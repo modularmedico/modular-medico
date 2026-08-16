@@ -20,6 +20,7 @@ import {
   RefreshCw,
   ListTree,
   X,
+  Loader2,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
@@ -75,14 +76,21 @@ export default function AdminPanel() {
   // Questions state for management
   const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);
   const [loadingQuestions, setLoadingQuestions] = useState(true);
+  // Set when the bank listing itself couldn't be loaded from Firestore (e.g. this
+  // account lacks the real admin custom claim) — tells the admin the list below is
+  // incomplete rather than letting an empty bank look like "0 questions saved".
+  const [bankLoadWarning, setBankLoadWarning] = useState<string | null>(null);
 
   // Subscribe to all questions
   useEffect(() => {
     setLoadingQuestions(true);
-    const unsub = subscribeAllQuestions((qs) => {
-      setAllQuestions(qs);
-      setLoadingQuestions(false);
-    });
+    const unsub = subscribeAllQuestions(
+      (qs) => {
+        setAllQuestions(qs);
+        setLoadingQuestions(false);
+      },
+      (_reason, message) => setBankLoadWarning(message)
+    );
     return () => unsub();
   }, []);
 
@@ -90,6 +98,10 @@ export default function AdminPanel() {
   /* ADD MCQ STATE                                                             */
   /* ------------------------------------------------------------------------- */
   const [inputMode, setInputMode] = useState<"bracket" | "traditional">("bracket");
+  // "success" = confirmed saved to Firestore. "success-local" = only cached in this
+  // browser (Firestore write was rejected) — still shown as a distinct warning, not
+  // a false "success", so the admin knows it won't show up anywhere else.
+  const [saveWarning, setSaveWarning] = useState<string | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<number>(1);
   const [isCustomBlock, setIsCustomBlock] = useState(false);
   const [customBlockInput, setCustomBlockInput] = useState("1");
@@ -106,13 +118,14 @@ export default function AdminPanel() {
   /* HIERARCHY: Block -> Module -> Subject -> Subheading                       */
   /* ------------------------------------------------------------------------- */
   const [subheadings, setSubheadings] = useState<SubheadingDoc[]>([]);
+  const [subheadingsLoading, setSubheadingsLoading] = useState(true);
   const [selectedSubheadingId, setSelectedSubheadingId] = useState<string>("");
   const [newSubheadingName, setNewSubheadingName] = useState("");
   const [creatingSubheading, setCreatingSubheading] = useState(false);
 
   // Bracket Mode State
   const [bracketText, setBracketText] = useState("");
-  const [saveStatus, setSaveStatus] = useState<"success" | "error" | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"success" | "success-local" | "error" | null>(null);
   const [savedCount, setSavedCount] = useState(0);
 
   // Traditional Mode State
@@ -147,7 +160,11 @@ export default function AdminPanel() {
   useEffect(() => {
     setSelectedSubheadingId("");
     setNewSubheadingName("");
-    const unsub = subscribeSubheadings(effectiveBlock, effectiveModuleId, subjectId, setSubheadings);
+    setSubheadingsLoading(true);
+    const unsub = subscribeSubheadings(effectiveBlock, effectiveModuleId, subjectId, (list) => {
+      setSubheadings(list);
+      setSubheadingsLoading(false);
+    });
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveBlock, effectiveModuleId, subjectId]);
@@ -218,13 +235,20 @@ export default function AdminPanel() {
         status: (publishImmediately ? "published" : "draft") as QuestionStatus,
       }));
 
-      await bulkAddQuestions(itemsToSave);
+      const result = await bulkAddQuestions(itemsToSave);
       setSavedCount(itemsToSave.length);
-      setSaveStatus("success");
+      if (result.source === "firestore") {
+        setSaveStatus("success");
+        setSaveWarning(null);
+      } else {
+        setSaveStatus("success-local");
+        setSaveWarning(result.message);
+      }
       setBracketText("");
-      setTimeout(() => setSaveStatus(null), 4000);
+      setTimeout(() => setSaveStatus(null), result.source === "firestore" ? 4000 : 9000);
     } catch {
       setSaveStatus("error");
+      setSaveWarning(null);
       setTimeout(() => setSaveStatus(null), 4000);
     }
   };
@@ -241,7 +265,7 @@ export default function AdminPanel() {
     if (!isTraditionalValid) return;
     try {
       const subheading = await resolveSubheadingForSave();
-      await addQuestion({
+      const result = await addQuestion({
         subjectId,
         moduleId: effectiveModuleId,
         moduleName: effectiveModuleName,
@@ -257,8 +281,15 @@ export default function AdminPanel() {
       });
 
       setSavedCount(1);
-      setSaveStatus("success");
-      setTimeout(() => setSaveStatus(null), 3000);
+      if (result.source === "firestore") {
+        setSaveStatus("success");
+        setSaveWarning(null);
+        setTimeout(() => setSaveStatus(null), 3000);
+      } else {
+        setSaveStatus("success-local");
+        setSaveWarning(result.message);
+        setTimeout(() => setSaveStatus(null), 9000);
+      }
 
       if (addAnother) {
         setTraditionalQ("");
@@ -273,6 +304,7 @@ export default function AdminPanel() {
       }
     } catch {
       setSaveStatus("error");
+      setSaveWarning(null);
       setTimeout(() => setSaveStatus(null), 3000);
     }
   };
@@ -642,30 +674,36 @@ export default function AdminPanel() {
               </div>
 
               {/* Previously used subheadings in this scope, for quick reuse or removal */}
-              {subheadings.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {subheadings.map((s) => (
-                    <Pill
-                      key={s.id}
-                      t={t}
-                      tone="teal"
-                      active={selectedSubheadingId === s.id}
-                      onClick={() => {
-                        setSelectedSubheadingId(s.id);
-                        setNewSubheadingName("");
-                      }}
-                    >
-                      {s.name}
-                      <X
-                        size={11}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteSubheading(s);
-                        }}
-                      />
-                    </Pill>
-                  ))}
+              {subheadingsLoading ? (
+                <div className="mt-3 flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
+                  <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
                 </div>
+              ) : (
+                subheadings.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {subheadings.map((s) => (
+                      <Pill
+                        key={s.id}
+                        t={t}
+                        tone="teal"
+                        active={selectedSubheadingId === s.id}
+                        onClick={() => {
+                          setSelectedSubheadingId(s.id);
+                          setNewSubheadingName("");
+                        }}
+                      >
+                        {s.name}
+                        <X
+                          size={11}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteSubheading(s);
+                          }}
+                        />
+                      </Pill>
+                    ))}
+                  </div>
+                )
               )}
             </div>
 
@@ -716,6 +754,19 @@ export default function AdminPanel() {
             >
               <CheckCircle2 size={18} />
               <span>Successfully saved {savedCount} MCQ{savedCount !== 1 ? "s" : ""} to Block {effectiveBlock} &bull; {effectiveModuleName}!</span>
+            </div>
+          )}
+
+          {saveStatus === "success-local" && (
+            <div
+              className="flex items-start gap-2 rounded-2xl px-4 py-3 text-sm font-bold shadow-sm"
+              style={{ backgroundColor: `${t.amber}20`, border: `1.5px solid ${t.amber}`, color: t.amber }}
+            >
+              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>
+                Saved {savedCount} MCQ{savedCount !== 1 ? "s" : ""} to this browser only — not to Firestore.
+                {saveWarning ? ` ${saveWarning}` : ""}
+              </span>
             </div>
           )}
 
@@ -984,6 +1035,16 @@ export default function AdminPanel() {
       {/* ===================================================================== */}
       {activeTab === "manage_mcq" && (
         <div className="flex flex-col gap-6">
+          {bankLoadWarning && (
+            <div
+              className="flex items-start gap-2 rounded-2xl px-4 py-3 text-sm font-bold shadow-sm"
+              style={{ backgroundColor: `${t.amber}20`, border: `1.5px solid ${t.amber}`, color: t.amber }}
+            >
+              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>This list may be incomplete. {bankLoadWarning}</span>
+            </div>
+          )}
+
           {/* Controls Bar & Filters */}
           <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
             <div className="flex flex-col gap-4">
@@ -1086,17 +1147,26 @@ export default function AdminPanel() {
                   <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
                     Subheading
                   </label>
-                  <select
-                    value={filterSubheading}
-                    onChange={(e) => setFilterSubheading(e.target.value)}
-                    className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
-                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
-                  >
-                    <option value="all">All Subheadings</option>
-                    {availableSubheadingNames.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
+                  {loadingQuestions ? (
+                    <div
+                      className="flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold"
+                      style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.textFaint }}
+                    >
+                      <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
+                    </div>
+                  ) : (
+                    <select
+                      value={filterSubheading}
+                      onChange={(e) => setFilterSubheading(e.target.value)}
+                      className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
+                      style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                    >
+                      <option value="all">All Subheadings</option>
+                      {availableSubheadingNames.map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
             </div>

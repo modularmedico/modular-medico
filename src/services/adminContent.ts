@@ -394,7 +394,29 @@ export interface QuestionInput {
   status?: QuestionStatus;
 }
 
-export async function addQuestion(input: QuestionInput) {
+/**
+ * Result of a save attempt. `source` tells the caller (and the UI) whether the
+ * MCQ(s) actually made it to Firestore — where they're visible in Manage MCQs &
+ * Bank, to other admins, and to students — or only got cached in this browser's
+ * localStorage because the Firestore write was rejected.
+ *
+ * `reason: "permission-denied"` specifically means the signed-in account does not
+ * carry the real `admin` custom claim that Firestore rules require (see
+ * scripts/setAdminClaim.mjs) — the in-app "Enter Admin" screen only gates the UI,
+ * it can't grant that claim. Any other reason is most likely a connectivity issue.
+ */
+export type SaveResult =
+  | { source: "firestore" }
+  | { source: "local"; reason: "permission-denied" | "offline" | "unknown"; message: string };
+
+function classifyWriteError(err: unknown): "permission-denied" | "offline" | "unknown" {
+  const code = (err as { code?: string } | null)?.code;
+  if (code === "permission-denied") return "permission-denied";
+  if (code === "unavailable" || (typeof navigator !== "undefined" && !navigator.onLine)) return "offline";
+  return "unknown";
+}
+
+export async function addQuestion(input: QuestionInput): Promise<SaveResult> {
   const cleanInput = {
     ...input,
     status: input.status ?? "draft",
@@ -402,15 +424,27 @@ export async function addQuestion(input: QuestionInput) {
   };
   try {
     await addDoc(collection(db, "questions"), cleanInput);
+    return { source: "firestore" };
   } catch (err) {
     console.warn("Firestore addQuestion failed, appending to local store:", err);
     const localQuestions: FirestoreQuestion[] = JSON.parse(localStorage.getItem("modular_medico_local_qs") || "[]");
     localQuestions.push({ id: `local-${Date.now()}-${Math.random()}`, ...cleanInput });
     localStorage.setItem("modular_medico_local_qs", JSON.stringify(localQuestions));
+    const reason = classifyWriteError(err);
+    return {
+      source: "local",
+      reason,
+      message:
+        reason === "permission-denied"
+          ? "Your account isn't a real Firestore admin yet, so this only saved to this browser — it won't show in Manage MCQs & Bank on other devices or for students. Run scripts/setAdminClaim.mjs to fix this."
+          : reason === "offline"
+          ? "You appear to be offline — this was cached locally and needs a real save once you're back online."
+          : "Firestore rejected this write for an unknown reason — this only saved to this browser.",
+    };
   }
 }
 
-export async function bulkAddQuestions(inputs: QuestionInput[]) {
+export async function bulkAddQuestions(inputs: QuestionInput[]): Promise<SaveResult> {
   try {
     const batch = writeBatch(db);
     inputs.forEach((input) => {
@@ -418,6 +452,7 @@ export async function bulkAddQuestions(inputs: QuestionInput[]) {
       batch.set(ref, { ...input, status: input.status ?? "draft", createdAt: Date.now() });
     });
     await batch.commit();
+    return { source: "firestore" };
   } catch (err) {
     console.warn("Firestore bulkAddQuestions failed, storing locally:", err);
     const localQuestions: FirestoreQuestion[] = JSON.parse(localStorage.getItem("modular_medico_local_qs") || "[]");
@@ -430,6 +465,17 @@ export async function bulkAddQuestions(inputs: QuestionInput[]) {
       });
     });
     localStorage.setItem("modular_medico_local_qs", JSON.stringify(localQuestions));
+    const reason = classifyWriteError(err);
+    return {
+      source: "local",
+      reason,
+      message:
+        reason === "permission-denied"
+          ? "Your account isn't a real Firestore admin yet, so these only saved to this browser — they won't show in Manage MCQs & Bank on other devices or for students. Run scripts/setAdminClaim.mjs to fix this."
+          : reason === "offline"
+          ? "You appear to be offline — these were cached locally and need a real save once you're back online."
+          : "Firestore rejected this write for an unknown reason — these only saved to this browser.",
+    };
   }
 }
 
@@ -557,8 +603,19 @@ export function subscribeSubjectQuestions(subjectId: string, cb: (questions: Fir
   );
 }
 
-/** Live view of every question in the bank */
-export function subscribeAllQuestions(cb: (questions: FirestoreQuestion[]) => void) {
+/**
+ * Live view of every question in the bank (all statuses). This is an unconstrained
+ * query, so Firestore rules require the caller to be a real admin (custom claim) —
+ * a signed-in user without that claim gets permission-denied for the *entire*
+ * listing, even for their own published questions. When that happens we still fall
+ * back to local + default questions so the screen isn't blank, but we also report
+ * the failure via `onError` so the UI can tell the admin their view is incomplete
+ * rather than silently showing 0 results as if the bank were actually empty.
+ */
+export function subscribeAllQuestions(
+  cb: (questions: FirestoreQuestion[]) => void,
+  onError?: (reason: "permission-denied" | "offline" | "unknown", message: string) => void
+) {
   return onSnapshot(
     collection(db, "questions"),
     (snap) => {
@@ -585,6 +642,16 @@ export function subscribeAllQuestions(cb: (questions: FirestoreQuestion[]) => vo
         (dq) => !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
       );
       cb(mergeQuestionSources(defQuestions, localQs, []));
+
+      const reason = classifyWriteError(err);
+      onError?.(
+        reason,
+        reason === "permission-denied"
+          ? "Your account isn't a real Firestore admin yet, so the bank can't be listed — you're only seeing MCQs cached in this browser. Run scripts/setAdminClaim.mjs to fix this."
+          : reason === "offline"
+          ? "You appear to be offline — only locally cached MCQs are shown."
+          : "Couldn't load the full MCQ bank from Firestore — only locally cached MCQs are shown."
+      );
     }
   );
 }
