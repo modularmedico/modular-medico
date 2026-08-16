@@ -22,6 +22,7 @@ import {
 import Pill from "../components/Pill";
 import Card from "../components/Card";
 import Btn from "../components/Btn";
+import WhatsAppCTA from "../components/WhatsAppCTA";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { SUBJECT_LIST, SUBJECT_META } from "../data/subjects";
@@ -332,6 +333,11 @@ export default function Home() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Need Guidance? — WhatsApp Community CTA */}
+      <section className="mx-auto w-full max-w-4xl">
+        <WhatsAppCTA />
       </section>
     </div>
   );

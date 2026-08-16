@@ -55,6 +55,27 @@ export interface SubheadingDoc {
   order: number;
 }
 
+/**
+ * A single Lecture document as stored in the Firestore `lectures` collection.
+ * Follows the exact same 4-tier hierarchy as MCQs — Block -> Module -> Subject ->
+ * Subheading — so a video is always filed under the same scaffold students already
+ * use to browse questions.
+ */
+export interface FirestoreLecture {
+  id: string;
+  title: string;
+  youtubeUrl: string;
+  description?: string;
+  subjectId: string;
+  moduleId: string;
+  moduleName: string;
+  block: number;
+  subheadingId?: string | null;
+  subheadingName?: string | null;
+  status: QuestionStatus; // reuse "draft" | "published"
+  createdAt?: number;
+}
+
 export interface AnswerRecord {
   selected: number | null;
   correct: boolean;

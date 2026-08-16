@@ -14,6 +14,8 @@ import Results from "./pages/Results";
 import Builder from "./pages/Builder";
 import Bookmarks from "./pages/Bookmarks";
 import Profile from "./pages/Profile";
+import Lectures from "./pages/Lectures";
+import Shop from "./pages/Shop";
 import AdminGate from "./pages/AdminGate";
 import AdminPanel from "./pages/AdminPanel";
 import Paywall from "./pages/Paywall";
@@ -80,6 +82,8 @@ export default function App() {
           <Route path="/builder" element={<Builder />} />
           <Route path="/bookmarks" element={<Bookmarks />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/lectures" element={<Lectures />} />
+          <Route path="/shop" element={<Shop />} />
           <Route path="/paywall" element={<Paywall />} />
         </Route>
 

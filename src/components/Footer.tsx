@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { BookOpen, ShieldCheck, Heart, Sparkles, Layers, GraduationCap } from "lucide-react";
 import Logomark from "./Logomark";
+import WhatsAppCTA from "./WhatsAppCTA";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import { SUBJECT_LIST, SUBJECT_META } from "../data/subjects";
@@ -16,6 +17,11 @@ export default function Footer() {
       style={{ backgroundColor: t.surface, borderColor: t.border, color: t.text }}
     >
       <div className="mx-auto max-w-6xl px-4 md:px-8">
+        {/* Need Guidance? — WhatsApp Community CTA */}
+        <div className="mb-10">
+          <WhatsAppCTA compact />
+        </div>
+
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           {/* Brand & Mission */}
           <div className="flex flex-col gap-3">
@@ -48,6 +54,16 @@ export default function Footer() {
               <li>
                 <button onClick={() => navigate("/subjects")} className="hover:opacity-80 transition-opacity">
                   Practice Library
+                </button>
+              </li>
+              <li>
+                <button onClick={() => navigate("/lectures")} className="hover:opacity-80 transition-opacity">
+                  Lectures
+                </button>
+              </li>
+              <li>
+                <button onClick={() => navigate("/shop")} className="hover:opacity-80 transition-opacity">
+                  Shop
                 </button>
               </li>
               <li>

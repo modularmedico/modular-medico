@@ -79,5 +79,12 @@ service cloud.firestore {
       allow get, list: if resource.data.status == 'published' || isAdmin();
       allow create, update, delete: if isAdmin();
     }
+
+    // Lectures: same access pattern as questions — guests/students can read only
+    // published lectures, admins can read/write everything (drafts included).
+    match /lectures/{lectureId} {
+      allow get, list: if resource.data.status == 'published' || isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
   }
 }

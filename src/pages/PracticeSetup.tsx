@@ -78,10 +78,13 @@ export default function PracticeSetup() {
   const [selectedSubheadingName, setSelectedSubheadingName] = useState<string>("");
 
   // Module-level subheading picker — used when practicing a whole Module ("Practice Module"),
-  // which can span several subjects. Subheadings are scoped per-subject in Firestore, so here
-  // we group by the human-readable name across every published question in the module instead.
-  const [moduleSubheadingNames, setModuleSubheadingNames] = useState<string[]>([]);
-  const [selectedModuleSubheadingName, setSelectedModuleSubheadingName] = useState<string>("");
+  // which can span several subjects. Subheadings are scoped per (block, module, subject) in
+  // Firestore, so two different subjects can legitimately each have a subheading with the same
+  // name (e.g. "Introduction"). To avoid silently merging those together, every option here is
+  // keyed and filtered by the (subjectId, subheadingName) PAIR, never by name alone — and the
+  // subject label is shown alongside the name so it's clear which subject each option belongs to.
+  const [moduleSubheadingOptions, setModuleSubheadingOptions] = useState<{ subjectId: string; name: string }[]>([]);
+  const [selectedModuleSubheading, setSelectedModuleSubheading] = useState<{ subjectId: string; name: string } | null>(null);
   const [moduleSubheadingsLoaded, setModuleSubheadingsLoaded] = useState(false);
 
   // Force strict settings in Exam mode
@@ -164,12 +167,13 @@ export default function PracticeSetup() {
     return merged.sort((a, b) => a.order - b.order);
   })();
 
-  // Discover the distinct subheadings used across every published question in this Module,
-  // so the whole-module "Practice Module" flow can offer the same narrowing the per-subject
-  // flow already has, instead of always bundling every subject's MCQs together.
+  // Discover the distinct (subject, subheading) pairs used across every published question in
+  // this Module, so the whole-module "Practice Module" flow can offer the same narrowing the
+  // per-subject flow already has, instead of always bundling every subject's MCQs together —
+  // and without conflating two different subjects' identically-named subheadings.
   useEffect(() => {
-    setSelectedModuleSubheadingName("");
-    setModuleSubheadingNames([]);
+    setSelectedModuleSubheading(null);
+    setModuleSubheadingOptions([]);
     if (!isModuleExam || !Number.isInteger(block)) {
       setModuleSubheadingsLoaded(true);
       return;
@@ -178,9 +182,21 @@ export default function PracticeSetup() {
     let cancelled = false;
     fetchPublishedModuleExam(block, moduleId).then((qs) => {
       if (cancelled) return;
-      const names = new Set<string>();
-      qs.forEach((q) => names.add(q.subheadingName || GENERAL_SUBHEADING_LABEL));
-      setModuleSubheadingNames(Array.from(names).sort());
+      const seen = new Set<string>();
+      const options: { subjectId: string; name: string }[] = [];
+      qs.forEach((q) => {
+        const name = q.subheadingName || GENERAL_SUBHEADING_LABEL;
+        const key = `${q.subjectId}::${name.toLowerCase()}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        options.push({ subjectId: q.subjectId, name });
+      });
+      options.sort((a, b) => {
+        const subjA = SUBJECT_META[a.subjectId as keyof typeof SUBJECT_META]?.label || a.subjectId;
+        const subjB = SUBJECT_META[b.subjectId as keyof typeof SUBJECT_META]?.label || b.subjectId;
+        return subjA === subjB ? a.name.localeCompare(b.name) : subjA.localeCompare(subjB);
+      });
+      setModuleSubheadingOptions(options);
       setModuleSubheadingsLoaded(true);
     });
     return () => {
@@ -209,7 +225,13 @@ export default function PracticeSetup() {
         if (mode === "exam") setTimerSeconds(qs.length * 60);
       });
     } else if (isModuleExam) {
-      fetchPublishedModuleExam(block, moduleId, undefined, selectedModuleSubheadingName || null).then((qs) => {
+      fetchPublishedModuleExam(
+        block,
+        moduleId,
+        undefined,
+        selectedModuleSubheading?.name || null,
+        selectedModuleSubheading?.subjectId || null
+      ).then((qs) => {
         setCount(qs.length);
         if (mode === "exam") setTimerSeconds(qs.length * 60);
       });
@@ -229,7 +251,7 @@ export default function PracticeSetup() {
     isSubjectInModule,
     mode,
     selectedSubheadingName,
-    selectedModuleSubheadingName,
+    selectedModuleSubheading,
   ]);
 
   if (!Number.isInteger(block) || (!isFullBlock && !isModuleExam && !isSubjectInModule)) {
@@ -268,7 +290,13 @@ export default function PracticeSetup() {
     if (isFullBlock) {
       questions = await fetchPublishedBlockExam(block, diff);
     } else if (isModuleExam) {
-      questions = await fetchPublishedModuleExam(block, moduleId, diff, selectedModuleSubheadingName || null);
+      questions = await fetchPublishedModuleExam(
+        block,
+        moduleId,
+        diff,
+        selectedModuleSubheading?.name || null,
+        selectedModuleSubheading?.subjectId || null
+      );
     } else {
       questions = await fetchPublishedBlock(subjectId, moduleId, block, diff, null, selectedSubheadingName || null);
     }
@@ -289,7 +317,9 @@ export default function PracticeSetup() {
       ? `Block ${block}: Full Exam`
       : isModuleExam
       ? `Block ${block} \u00b7 ${targetModule?.name || moduleId}${
-          selectedModuleSubheadingName ? ` \u00b7 ${selectedModuleSubheadingName}` : ""
+          selectedModuleSubheading
+            ? ` \u00b7 ${SUBJECT_META[selectedModuleSubheading.subjectId as keyof typeof SUBJECT_META]?.label || selectedModuleSubheading.subjectId} \u2013 ${selectedModuleSubheading.name}`
+            : ""
         }`
       : `${SUBJECT_META[subjectId as keyof typeof SUBJECT_META]?.label || ""} (${targetModule?.name || `B${block}`})${
           selectedSubheading ? ` \u00b7 ${selectedSubheading.name}` : ""
@@ -479,8 +509,10 @@ export default function PracticeSetup() {
         )}
 
         {/* Subheading — Module-wide picker, shown when practicing a whole Module ("Practice
-            Module") that has published MCQs tagged with subheadings across its subjects. */}
-        {isModuleExam && (moduleSubheadingNames.length > 0 || !moduleSubheadingsLoaded) && (
+            Module") that has published MCQs tagged with subheadings across its subjects.
+            Each option is a (subject, subheading) pair — labelled with its subject — so two
+            different subjects' identically-named subheadings are never conflated. */}
+        {isModuleExam && (moduleSubheadingOptions.length > 0 || !moduleSubheadingsLoaded) && (
           <div>
             <span className="mb-2 block text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
               Subheading
@@ -494,22 +526,27 @@ export default function PracticeSetup() {
                 <Pill
                   t={t}
                   tone="muted"
-                  active={selectedModuleSubheadingName === ""}
-                  onClick={() => setSelectedModuleSubheadingName("")}
+                  active={selectedModuleSubheading === null}
+                  onClick={() => setSelectedModuleSubheading(null)}
                 >
                   All Subheadings
                 </Pill>
-                {moduleSubheadingNames.map((name) => (
-                  <Pill
-                    key={name}
-                    t={t}
-                    tone="teal"
-                    active={selectedModuleSubheadingName === name}
-                    onClick={() => setSelectedModuleSubheadingName(name)}
-                  >
-                    {name}
-                  </Pill>
-                ))}
+                {moduleSubheadingOptions.map((opt) => {
+                  const subjLabel = SUBJECT_META[opt.subjectId as keyof typeof SUBJECT_META]?.label || opt.subjectId;
+                  const active =
+                    selectedModuleSubheading?.subjectId === opt.subjectId && selectedModuleSubheading?.name === opt.name;
+                  return (
+                    <Pill
+                      key={`${opt.subjectId}::${opt.name}`}
+                      t={t}
+                      tone="teal"
+                      active={active}
+                      onClick={() => setSelectedModuleSubheading(opt)}
+                    >
+                      <span style={{ opacity: 0.65, fontWeight: 600 }}>{subjLabel}:</span> {opt.name}
+                    </Pill>
+                  );
+                })}
               </div>
             )}
           </div>

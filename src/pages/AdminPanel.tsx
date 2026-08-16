@@ -21,6 +21,9 @@ import {
   ListTree,
   X,
   Loader2,
+  Video,
+  Youtube,
+  ExternalLink,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
@@ -46,12 +49,21 @@ import {
   createSubheading,
   deleteSubheading,
 } from "../services/adminContent";
+import {
+  addLecture,
+  updateLectureStatus,
+  deleteLecture,
+  subscribeAllLectures,
+  toYouTubeEmbedUrl,
+} from "../services/lectures";
 import { parseBracketFormat } from "../utils/parseBracketFormat";
-import type { Difficulty, FirestoreQuestion, QuestionStatus, SubheadingDoc } from "../types";
+import type { Difficulty, FirestoreLecture, FirestoreQuestion, QuestionStatus, SubheadingDoc } from "../types";
 
 const ADMIN_TABS = [
   { id: "add_mcq", label: "Add MCQs", icon: PlusCircle },
   { id: "manage_mcq", label: "Manage MCQs & Bank", icon: Search },
+  { id: "add_lecture", label: "Add Lecture", icon: Video },
+  { id: "manage_lecture", label: "Manage Lectures", icon: Youtube },
 ] as const;
 
 type AdminTab = typeof ADMIN_TABS[number]["id"];
@@ -147,6 +159,173 @@ export default function AdminPanel() {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  /* ------------------------------------------------------------------------- */
+  /* LECTURES STATE (own Block -> Module -> Subject -> Subheading hierarchy,   */
+  /* mirroring the MCQ form exactly per the same 4-tier content scaffold)      */
+  /* ------------------------------------------------------------------------- */
+  const [lectures, setLectures] = useState<FirestoreLecture[]>([]);
+  const [loadingLectures, setLoadingLectures] = useState(true);
+  const [lectureBankWarning, setLectureBankWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadingLectures(true);
+    const unsub = subscribeAllLectures(
+      (ls) => {
+        setLectures(ls);
+        setLoadingLectures(false);
+      },
+      (_reason, message) => setLectureBankWarning(message)
+    );
+    return () => unsub();
+  }, []);
+
+  const [lectureBlock, setLectureBlock] = useState<number>(1);
+  const [isCustomLectureBlock, setIsCustomLectureBlock] = useState(false);
+  const [customLectureBlockInput, setCustomLectureBlockInput] = useState("1");
+  const [lectureModulePreset, setLectureModulePreset] = useState<string>(MASTER_MODULES[0]?.name || "Foundation-I");
+  const [isCustomLectureModule, setIsCustomLectureModule] = useState(false);
+  const [customLectureModuleName, setCustomLectureModuleName] = useState("");
+  const [lectureSubjectId, setLectureSubjectId] = useState<SubjectId>("gross_anatomy");
+  const [lecturePublishImmediately, setLecturePublishImmediately] = useState(true);
+
+  const [lectureSubheadings, setLectureSubheadings] = useState<SubheadingDoc[]>([]);
+  const [lectureSubheadingsLoading, setLectureSubheadingsLoading] = useState(true);
+  const [selectedLectureSubheadingId, setSelectedLectureSubheadingId] = useState<string>("");
+  const [newLectureSubheadingName, setNewLectureSubheadingName] = useState("");
+  const [creatingLectureSubheading, setCreatingLectureSubheading] = useState(false);
+
+  const [lectureTitle, setLectureTitle] = useState("");
+  const [lectureUrl, setLectureUrl] = useState("");
+  const [lectureDescription, setLectureDescription] = useState("");
+  const [lectureSaveStatus, setLectureSaveStatus] = useState<"success" | "success-local" | "error" | null>(null);
+  const [lectureSaveWarning, setLectureSaveWarning] = useState<string | null>(null);
+
+  const effectiveLectureBlock = isCustomLectureBlock ? parseInt(customLectureBlockInput, 10) || 1 : lectureBlock;
+  const effectiveLectureModuleName = isCustomLectureModule
+    ? customLectureModuleName.trim() || "General Module"
+    : lectureModulePreset;
+  const effectiveLectureModuleId = effectiveLectureModuleName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+  useEffect(() => {
+    setSelectedLectureSubheadingId("");
+    setNewLectureSubheadingName("");
+    setLectureSubheadingsLoading(true);
+    const unsub = subscribeSubheadings(effectiveLectureBlock, effectiveLectureModuleId, lectureSubjectId, (list) => {
+      setLectureSubheadings(list);
+      setLectureSubheadingsLoading(false);
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveLectureBlock, effectiveLectureModuleId, lectureSubjectId]);
+
+  const selectedLectureSubheading = lectureSubheadings.find((s) => s.id === selectedLectureSubheadingId) || null;
+
+  const handleCreateLectureSubheading = async () => {
+    const name = newLectureSubheadingName.trim();
+    if (!name || creatingLectureSubheading) return;
+    setCreatingLectureSubheading(true);
+    try {
+      const id = await createSubheading(effectiveLectureBlock, effectiveLectureModuleId, lectureSubjectId, name);
+      setSelectedLectureSubheadingId(id);
+      setNewLectureSubheadingName("");
+    } finally {
+      setCreatingLectureSubheading(false);
+    }
+  };
+
+  const resolveLectureSubheadingForSave = async (): Promise<{ id: string | null; name: string | null }> => {
+    if (selectedLectureSubheading) return { id: selectedLectureSubheading.id, name: selectedLectureSubheading.name };
+    const typed = newLectureSubheadingName.trim();
+    if (!typed) return { id: null, name: null };
+    const id = await createSubheading(effectiveLectureBlock, effectiveLectureModuleId, lectureSubjectId, typed);
+    setSelectedLectureSubheadingId(id);
+    return { id, name: typed };
+  };
+
+  const isLectureValid = lectureTitle.trim().length > 0 && !!toYouTubeEmbedUrl(lectureUrl);
+
+  const handleSaveLecture = async () => {
+    if (!isLectureValid) return;
+    try {
+      const subheading = await resolveLectureSubheadingForSave();
+      const result = await addLecture({
+        title: lectureTitle.trim(),
+        youtubeUrl: lectureUrl.trim(),
+        description: lectureDescription.trim(),
+        subjectId: lectureSubjectId,
+        moduleId: effectiveLectureModuleId,
+        moduleName: effectiveLectureModuleName,
+        block: effectiveLectureBlock,
+        subheadingId: subheading.id,
+        subheadingName: subheading.name,
+        status: (lecturePublishImmediately ? "published" : "draft") as QuestionStatus,
+      });
+      if (result.source === "firestore") {
+        setLectureSaveStatus("success");
+        setLectureSaveWarning(null);
+        setTimeout(() => setLectureSaveStatus(null), 3000);
+      } else {
+        setLectureSaveStatus("success-local");
+        setLectureSaveWarning(result.message);
+        setTimeout(() => setLectureSaveStatus(null), 9000);
+      }
+      setLectureTitle("");
+      setLectureUrl("");
+      setLectureDescription("");
+    } catch {
+      setLectureSaveStatus("error");
+      setLectureSaveWarning(null);
+      setTimeout(() => setLectureSaveStatus(null), 4000);
+    }
+  };
+
+  const handleDeleteLecture = async (l: FirestoreLecture) => {
+    try {
+      await deleteLecture(l.id);
+      setActionNotice(`Removed lecture: "${l.title.slice(0, 40)}"`);
+      setTimeout(() => setActionNotice(null), 3500);
+    } catch {
+      setActionNotice("Failed to delete lecture.");
+      setTimeout(() => setActionNotice(null), 3000);
+    }
+  };
+
+  const handleToggleLectureStatus = async (l: FirestoreLecture) => {
+    const nextStatus: QuestionStatus = l.status === "published" ? "draft" : "published";
+    try {
+      await updateLectureStatus(l.id, nextStatus);
+      setActionNotice(`Lecture status set to ${nextStatus}.`);
+      setTimeout(() => setActionNotice(null), 2500);
+    } catch {
+      setActionNotice("Failed to update lecture status.");
+      setTimeout(() => setActionNotice(null), 2500);
+    }
+  };
+
+  const [lectureFilterBlock, setLectureFilterBlock] = useState<string>("all");
+  const [lectureFilterSubject, setLectureFilterSubject] = useState<string>("all");
+  const [lectureFilterStatus, setLectureFilterStatus] = useState<string>("all");
+  const [lectureSearchQuery, setLectureSearchQuery] = useState("");
+
+  const filteredLectures = useMemo(() => {
+    return lectures
+      .filter((l) => {
+        if (lectureFilterBlock !== "all" && l.block !== Number(lectureFilterBlock)) return false;
+        if (lectureFilterSubject !== "all" && l.subjectId !== lectureFilterSubject) return false;
+        if (lectureFilterStatus !== "all" && l.status !== lectureFilterStatus) return false;
+        if (lectureSearchQuery.trim()) {
+          const query = lectureSearchQuery.toLowerCase();
+          const inTitle = l.title.toLowerCase().includes(query);
+          const inDesc = l.description?.toLowerCase().includes(query);
+          const inMod = l.moduleName?.toLowerCase().includes(query);
+          const inSub = l.subheadingName?.toLowerCase().includes(query);
+          if (!inTitle && !inDesc && !inMod && !inSub) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [lectures, lectureFilterBlock, lectureFilterSubject, lectureFilterStatus, lectureSearchQuery]);
 
   const effectiveBlock = isCustomBlock ? parseInt(customBlockInput, 10) || 1 : selectedBlock;
   const effectiveModuleName = isCustomModule
@@ -460,6 +639,14 @@ export default function AdminPanel() {
                   style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
                 >
                   {allQuestions.length}
+                </span>
+              )}
+              {tab.id === "manage_lecture" && (
+                <span
+                  className="rounded-full px-2 py-0.2 text-[11px] font-mono font-bold"
+                  style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
+                >
+                  {lectures.length}
                 </span>
               )}
             </button>
@@ -1351,6 +1538,427 @@ export default function AdminPanel() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 3: ADD LECTURE                                                    */}
+      {/* ===================================================================== */}
+      {activeTab === "add_lecture" && (
+        <div className="flex flex-col gap-6">
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-center justify-between border-b pb-3 mb-4" style={{ borderColor: t.border }}>
+              <div className="flex items-center gap-2">
+                <Layers size={17} color={t.purple} />
+                <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
+                  Target Assignment (Combine Any Block with Any Module)
+                </span>
+              </div>
+              <span className="text-xs" style={{ color: t.textFaint }}>
+                Lectures follow the same Block &rarr; Module &rarr; Subject &rarr; Subheading scaffold as MCQs
+              </span>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {/* 1. Block Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Target Block
+                </label>
+                {!isCustomLectureBlock ? (
+                  <select
+                    value={lectureBlock}
+                    onChange={(e) => setLectureBlock(Number(e.target.value))}
+                    className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  >
+                    {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1).map((b) => (
+                      <option key={b} value={b} style={{ backgroundColor: t.surface, color: t.text }}>
+                        Block {b}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="number"
+                    min="1"
+                    max="99"
+                    value={customLectureBlockInput}
+                    onChange={(e) => setCustomLectureBlockInput(e.target.value)}
+                    placeholder="Enter Block #"
+                    className="w-full rounded-xl px-3 py-2 text-sm font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  />
+                )}
+                <button
+                  onClick={() => setIsCustomLectureBlock(!isCustomLectureBlock)}
+                  className="mt-1 text-[11px] font-bold underline"
+                  style={{ color: t.teal }}
+                >
+                  {isCustomLectureBlock ? "Choose from standard 1–15" : "+ Custom Block #"}
+                </button>
+              </div>
+
+              {/* 2. Module Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Target Module
+                </label>
+                {!isCustomLectureModule ? (
+                  <select
+                    value={lectureModulePreset}
+                    onChange={(e) => setLectureModulePreset(e.target.value)}
+                    className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  >
+                    {MASTER_MODULES.map((m) => (
+                      <option key={m.id} value={m.name} style={{ backgroundColor: t.surface, color: t.text }}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={customLectureModuleName}
+                    onChange={(e) => setCustomLectureModuleName(e.target.value)}
+                    placeholder="e.g. Cardiovascular-I"
+                    className="w-full rounded-xl px-3 py-2 text-sm font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  />
+                )}
+                <button
+                  onClick={() => setIsCustomLectureModule(!isCustomLectureModule)}
+                  className="mt-1 text-[11px] font-bold underline"
+                  style={{ color: t.teal }}
+                >
+                  {isCustomLectureModule ? "Choose from standard modules" : "+ Type Custom Module Name"}
+                </button>
+              </div>
+
+              {/* 3. Subject Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Discipline / Subject
+                </label>
+                <select
+                  value={lectureSubjectId}
+                  onChange={(e) => setLectureSubjectId(e.target.value as SubjectId)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  {SUBJECT_LIST.map((s) => (
+                    <option key={s} value={s} style={{ backgroundColor: t.surface, color: t.text }}>
+                      {SUBJECT_META[s].label}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[11px]" style={{ color: t.textFaint }}>
+                  {SUBJECT_META[lectureSubjectId]?.defaultYear}
+                </span>
+              </div>
+            </div>
+
+            {/* 4. Subheading — 4th level of the hierarchy, scoped to this exact Block + Module + Subject */}
+            <div className="mt-4 border-t pt-4" style={{ borderColor: t.border }}>
+              <div className="mb-1.5">
+                <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  <ListTree size={13} /> Subheading
+                </label>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={selectedLectureSubheading ? selectedLectureSubheading.name : newLectureSubheadingName}
+                  onChange={(e) => {
+                    setSelectedLectureSubheadingId("");
+                    setNewLectureSubheadingName(e.target.value);
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateLectureSubheading()}
+                  placeholder="Type a subheading, e.g. Coronary Circulation"
+                  className="flex-1 min-w-[200px] rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+                {selectedLectureSubheading ? (
+                  <button
+                    onClick={() => {
+                      setSelectedLectureSubheadingId("");
+                      setNewLectureSubheadingName("");
+                    }}
+                    className="flex items-center gap-1 rounded-xl px-3 py-2.5 text-xs font-bold transition-all"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.textMuted }}
+                  >
+                    <X size={13} /> Clear
+                  </button>
+                ) : (
+                  <Btn t={t} variant="secondary" disabled={!newLectureSubheadingName.trim() || creatingLectureSubheading} onClick={handleCreateLectureSubheading}>
+                    {creatingLectureSubheading ? "Adding\u2026" : "Add"}
+                  </Btn>
+                )}
+              </div>
+
+              {lectureSubheadingsLoading ? (
+                <div className="mt-3 flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
+                  <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
+                </div>
+              ) : (
+                lectureSubheadings.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {lectureSubheadings.map((s) => (
+                      <Pill
+                        key={s.id}
+                        t={t}
+                        tone="teal"
+                        active={selectedLectureSubheadingId === s.id}
+                        onClick={() => {
+                          setSelectedLectureSubheadingId(s.id);
+                          setNewLectureSubheadingName("");
+                        }}
+                      >
+                        {s.name}
+                      </Pill>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+
+            {/* Target Summary Pill */}
+            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt }}>
+              <span className="font-bold" style={{ color: t.textMuted }}>Adding to:</span>
+              <Pill t={t} tone="teal">Block {effectiveLectureBlock}</Pill>
+              <Pill t={t} tone="purple">{effectiveLectureModuleName}</Pill>
+              <Pill t={t} tone="gold">{SUBJECT_META[lectureSubjectId].label}</Pill>
+              {selectedLectureSubheading && <Pill t={t} tone="muted">{selectedLectureSubheading.name}</Pill>}
+            </div>
+          </Card>
+
+          {/* Lecture Details Card */}
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-center gap-2 border-b pb-3 mb-4" style={{ borderColor: t.border }}>
+              <Youtube size={17} color={t.purple} />
+              <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>Lecture Details</span>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Lecture Title
+                </label>
+                <input
+                  type="text"
+                  value={lectureTitle}
+                  onChange={(e) => setLectureTitle(e.target.value)}
+                  placeholder="e.g. Cardiac Cycle Explained"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  YouTube Link
+                </label>
+                <input
+                  type="text"
+                  value={lectureUrl}
+                  onChange={(e) => setLectureUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+                {lectureUrl.trim() && !toYouTubeEmbedUrl(lectureUrl) && (
+                  <span className="mt-1 block text-[11px] font-bold" style={{ color: t.gold }}>
+                    Couldn't recognize that as a YouTube link — paste the full video URL.
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Description (optional)
+                </label>
+                <textarea
+                  value={lectureDescription}
+                  onChange={(e) => setLectureDescription(e.target.value)}
+                  placeholder="What this lecture covers..."
+                  rows={3}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm outline-none resize-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs font-bold cursor-pointer" style={{ color: t.textMuted }}>
+                <input
+                  type="checkbox"
+                  checked={lecturePublishImmediately}
+                  onChange={(e) => setLecturePublishImmediately(e.target.checked)}
+                  className="accent-purple-500 rounded"
+                />
+                Publish immediately (Live)
+              </label>
+
+              {lectureSaveStatus === "success" && (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.green}20`, color: t.green }}>
+                  <CheckCircle2 size={16} /> Lecture saved to Firestore!
+                </div>
+              )}
+              {lectureSaveStatus === "success-local" && (
+                <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold" style={{ backgroundColor: `${t.gold}20`, color: t.gold }}>
+                  <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                  <span>{lectureSaveWarning}</span>
+                </div>
+              )}
+              {lectureSaveStatus === "error" && (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.red}20`, color: t.red }}>
+                  <XCircle size={16} /> Failed to save lecture. Try again.
+                </div>
+              )}
+
+              <Btn t={t} disabled={!isLectureValid} onClick={handleSaveLecture}>
+                Save Lecture
+              </Btn>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 4: MANAGE LECTURES                                                */}
+      {/* ===================================================================== */}
+      {activeTab === "manage_lecture" && (
+        <div className="flex flex-col gap-5">
+          {lectureBankWarning && (
+            <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold" style={{ backgroundColor: `${t.gold}20`, color: t.gold }}>
+              <AlertTriangle size={15} className="shrink-0 mt-0.5" /> <span>{lectureBankWarning}</span>
+            </div>
+          )}
+
+          {/* Filters */}
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex flex-col gap-3">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" color={t.textFaint} />
+                <input
+                  type="text"
+                  value={lectureSearchQuery}
+                  onChange={(e) => setLectureSearchQuery(e.target.value)}
+                  placeholder="Search lectures by title, description, module, subheading..."
+                  className="w-full rounded-xl py-2.5 pl-9 pr-3 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={lectureFilterBlock}
+                  onChange={(e) => setLectureFilterBlock(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Blocks</option>
+                  {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1).map((b) => (
+                    <option key={b} value={b}>Block {b}</option>
+                  ))}
+                </select>
+                <select
+                  value={lectureFilterSubject}
+                  onChange={(e) => setLectureFilterSubject(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Subjects</option>
+                  {SUBJECT_LIST.map((s) => (
+                    <option key={s} value={s}>{SUBJECT_META[s].label}</option>
+                  ))}
+                </select>
+                <select
+                  value={lectureFilterStatus}
+                  onChange={(e) => setLectureFilterStatus(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="published">Published</option>
+                  <option value="draft">Draft</option>
+                </select>
+              </div>
+            </div>
+          </Card>
+
+          {loadingLectures ? (
+            <div className="flex items-center justify-center py-16">
+              <Spinner t={t} size={22} label="Loading lectures\u2026" />
+            </div>
+          ) : filteredLectures.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center gap-2 rounded-2xl p-10 text-center"
+              style={{ backgroundColor: t.surfaceAlt, border: `1.5px dashed ${t.border}` }}
+            >
+              <Youtube size={22} color={t.textFaint} />
+              <p className="text-sm font-semibold" style={{ color: t.textMuted }}>No lectures match these filters.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {filteredLectures.map((l) => (
+                <div
+                  key={l.id}
+                  className="flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                      <Pill t={t} tone="teal">Block {l.block}</Pill>
+                      <Pill t={t} tone="purple">{l.moduleName}</Pill>
+                      <Pill t={t} tone="gold">{SUBJECT_META[l.subjectId as SubjectId]?.label || l.subjectId}</Pill>
+                      {l.subheadingName && <Pill t={t} tone="muted">{l.subheadingName}</Pill>}
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                        style={{
+                          backgroundColor: l.status === "published" ? `${t.green}20` : `${t.textFaint}20`,
+                          color: l.status === "published" ? t.green : t.textFaint,
+                        }}
+                      >
+                        {l.status === "published" ? "Published" : "Draft"}
+                      </span>
+                    </div>
+                    <h4 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>{l.title}</h4>
+                    {l.description && (
+                      <p className="mt-0.5 text-xs" style={{ color: t.textMuted }}>{l.description}</p>
+                    )}
+                    <a
+                      href={l.youtubeUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 flex w-fit items-center gap-1 text-[11px] font-bold hover:opacity-80"
+                      style={{ color: t.teal }}
+                    >
+                      Watch on YouTube <ExternalLink size={11} />
+                    </a>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      onClick={() => handleToggleLectureStatus(l)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl"
+                      style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+                      title={l.status === "published" ? "Unpublish" : "Publish"}
+                    >
+                      {l.status === "published" ? <EyeOff size={15} color={t.textMuted} /> : <Eye size={15} color={t.green} />}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteLecture(l)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl"
+                      style={{ backgroundColor: `${t.red}15`, border: `1.5px solid ${t.red}40` }}
+                      title="Delete lecture"
+                    >
+                      <Trash2 size={15} color={t.red} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

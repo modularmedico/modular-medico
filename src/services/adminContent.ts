@@ -751,13 +751,25 @@ export async function fetchPublishedModuleExam(
   block: number,
   moduleId: string,
   difficulty?: Difficulty | "all",
-  subheadingName?: string | null
+  subheadingName?: string | null,
+  subjectId?: string | null
 ): Promise<FirestoreQuestion[]> {
-  // Subheadings are scoped per-subject, but a Module spans multiple subjects, so we
-  // group by the human-readable subheadingName (same approach the admin bank filter
-  // uses) rather than subheadingId, which would only match within a single subject.
-  const applySubheadingFilter = (list: FirestoreQuestion[]) =>
-    subheadingName ? list.filter((item) => (item.subheadingName || "General / No subheading") === subheadingName) : list;
+  // Subheadings are scoped per (block, moduleId, subjectId) — a Module spans multiple
+  // subjects, and two different subjects can legitimately each have a subheading named
+  // e.g. "Introduction". Matching by name alone would silently merge those into one
+  // filter option and mix both subjects' questions together. So the module-wide picker
+  // must always disambiguate by subjectId + subheadingName together, never name alone.
+  const applySubheadingFilter = (list: FirestoreQuestion[]) => {
+    if (!subheadingName) return list;
+    return list.filter((item) => {
+      const nameMatches = (item.subheadingName || "General / No subheading") === subheadingName;
+      if (!nameMatches) return false;
+      // subjectId is optional for backwards compatibility, but should always be passed
+      // by callers going forward — see PracticeSetup.tsx.
+      if (subjectId) return item.subjectId === subjectId;
+      return true;
+    });
+  };
 
   try {
     const clauses = [

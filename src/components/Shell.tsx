@@ -16,6 +16,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Shield,
+  Video,
+  ShoppingBag,
 } from "lucide-react";
 import Logomark from "./Logomark";
 import Footer from "./Footer";
@@ -29,6 +31,13 @@ const NAV_ITEMS = [
   { to: "/builder", label: "Build", icon: Wand2, center: true },
   { to: "/bookmarks", label: "Saved", icon: Bookmark },
   { to: "/profile", label: "Profile", icon: User },
+];
+
+// Secondary links — shown in the hamburger drawer (mobile) and desktop sidebar, but
+// not in the 5-slot bottom mobile tab bar (kept lean on purpose).
+const SECONDARY_NAV_ITEMS = [
+  { to: "/lectures", label: "Lectures", icon: Video },
+  { to: "/shop", label: "Shop", icon: ShoppingBag },
 ];
 
 export default function Shell() {
@@ -226,6 +235,29 @@ export default function Shell() {
                   </NavLink>
                 );
               })}
+
+              <div className="my-2 h-px" style={{ backgroundColor: t.border }} />
+
+              {SECONDARY_NAV_ITEMS.map((item) => {
+                const active = isActive(item.to);
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={`flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-bold transition-colors ${
+                      sidebarCollapsed ? "justify-center px-2" : ""
+                    }`}
+                    style={{
+                      backgroundColor: active ? t.purpleDeep : "transparent",
+                      color: active ? (isDark ? "#fff" : t.purpleStrong) : t.textMuted,
+                    }}
+                    title={sidebarCollapsed ? item.label : undefined}
+                  >
+                    <item.icon size={18} />
+                    {!sidebarCollapsed && <span>{item.label}</span>}
+                  </NavLink>
+                );
+              })}
             </nav>
           </div>
 
@@ -301,6 +333,23 @@ export default function Shell() {
                       style={{
                         backgroundColor: isActive(item.to, item.end) ? t.purpleDeep : "transparent",
                         color: isActive(item.to, item.end) ? (isDark ? "#fff" : t.purpleStrong) : t.textMuted,
+                      }}
+                    >
+                      <item.icon size={18} /> {item.label}
+                    </NavLink>
+                  ))}
+
+                  <div className="my-3 h-px" style={{ backgroundColor: t.border }} />
+
+                  {SECONDARY_NAV_ITEMS.map((item) => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold transition-all"
+                      style={{
+                        backgroundColor: isActive(item.to) ? t.purpleDeep : "transparent",
+                        color: isActive(item.to) ? (isDark ? "#fff" : t.purpleStrong) : t.textMuted,
                       }}
                     >
                       <item.icon size={18} /> {item.label}
