@@ -17,7 +17,7 @@ import {
 import {
   subscribeBlockDefinitions,
   subscribeCurriculumCounts,
-  subscribeAllQuestions,
+  subscribePublishedQuestions,
   type CurriculumCounts,
 } from "../services/adminContent";
 import type { FirestoreQuestion } from "../types";
@@ -43,7 +43,7 @@ export default function SubjectDetail() {
   useEffect(() => subscribeCurriculumCounts(setCounts), []);
   useEffect(
     () =>
-      subscribeAllQuestions((qs) => {
+      subscribePublishedQuestions((qs) => {
         setAllQuestions(qs);
         setQuestionsLoaded(true);
       }),
