@@ -67,9 +67,15 @@ export default function PracticeSetup() {
   const [count, setCount] = useState<number | null>(null);
 
   // Subheading picker — 4th tier of the hierarchy (Block -> Module -> Subject -> Subheading).
-  // Only relevant when practicing a single Subject within a single Module.
-  const [subheadings, setSubheadings] = useState<SubheadingDoc[]>([]);
-  const [selectedSubheadingId, setSelectedSubheadingId] = useState<string>("");
+  // Only relevant when practicing a single Subject within a single Module. We select by
+  // *name* rather than the Firestore doc id: the same subheading can legitimately have
+  // different ids in Firestore vs. a locally-cached copy (e.g. one created while offline),
+  // and filtering by id risked silently matching zero questions even though the subheading
+  // pill was visible and selected.
+  const [subheadingDocs, setSubheadingDocs] = useState<SubheadingDoc[]>([]);
+  const [subheadingNamesFromQuestions, setSubheadingNamesFromQuestions] = useState<string[]>([]);
+  const [subheadingsLoaded, setSubheadingsLoaded] = useState(false);
+  const [selectedSubheadingName, setSelectedSubheadingName] = useState<string>("");
 
   // Module-level subheading picker — used when practicing a whole Module ("Practice Module"),
   // which can span several subjects. Subheadings are scoped per-subject in Firestore, so here
@@ -98,16 +104,65 @@ export default function PracticeSetup() {
   const isSubjectInModule = isSubjectId(subjectId);
 
   // Load subheadings scoped to this exact Block + Module + Subject, resetting the
-  // selection whenever the underlying scope changes.
+  // selection whenever the underlying scope changes. Two sources are combined:
+  // the `subheadings` docs (for order/labels) and the actual subheading names
+  // present on published questions (the source of truth for what's practiceable) —
+  // so a subheading never fails to appear here just because its doc record didn't
+  // sync, and never appears here without actually having any questions to show.
   useEffect(() => {
-    setSelectedSubheadingId("");
+    setSelectedSubheadingName("");
+    setSubheadingDocs([]);
+    setSubheadingNamesFromQuestions([]);
     if (!isSubjectInModule) {
-      setSubheadings([]);
+      setSubheadingsLoaded(true);
       return;
     }
-    return subscribeSubheadings(block, moduleId, subjectId, setSubheadings);
+    setSubheadingsLoaded(false);
+    let cancelled = false;
+
+    const unsubDocs = subscribeSubheadings(block, moduleId, subjectId, (docs) => {
+      if (!cancelled) setSubheadingDocs(docs);
+    });
+
+    fetchPublishedBlock(subjectId, moduleId, block).then((qs) => {
+      if (cancelled) return;
+      const names = new Set<string>();
+      qs.forEach((q) => {
+        if (q.subheadingName) names.add(q.subheadingName.trim());
+      });
+      setSubheadingNamesFromQuestions(Array.from(names));
+      setSubheadingsLoaded(true);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubDocs();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSubjectInModule, block, moduleId, subjectId]);
+
+  // Merge the two sources by name, ordered by the subheading docs' `order` where known,
+  // then alphabetically for any question-only names that have no matching doc.
+  const subheadings = (() => {
+    const seen = new Set<string>();
+    const merged: { name: string; order: number }[] = [];
+    subheadingDocs.forEach((s) => {
+      const key = s.name.trim().toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push({ name: s.name.trim(), order: s.order ?? merged.length });
+    });
+    subheadingNamesFromQuestions
+      .slice()
+      .sort()
+      .forEach((name) => {
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        merged.push({ name, order: merged.length + 1000 });
+      });
+    return merged.sort((a, b) => a.order - b.order);
+  })();
 
   // Discover the distinct subheadings used across every published question in this Module,
   // so the whole-module "Practice Module" flow can offer the same narrowing the per-subject
@@ -142,7 +197,9 @@ export default function PracticeSetup() {
 
   const locked = block !== 1 && !isPremium;
 
-  const selectedSubheading = subheadings.find((s) => s.id === selectedSubheadingId) || null;
+  const selectedSubheading = selectedSubheadingName
+    ? subheadings.find((s) => s.name === selectedSubheadingName) || null
+    : null;
 
   useEffect(() => {
     if (locked) return;
@@ -157,7 +214,7 @@ export default function PracticeSetup() {
         if (mode === "exam") setTimerSeconds(qs.length * 60);
       });
     } else if (isSubjectInModule) {
-      fetchPublishedBlock(subjectId, moduleId, block, undefined, selectedSubheadingId || null).then((qs) => {
+      fetchPublishedBlock(subjectId, moduleId, block, undefined, null, selectedSubheadingName || null).then((qs) => {
         setCount(qs.length);
         if (mode === "exam") setTimerSeconds(qs.length * 60);
       });
@@ -171,7 +228,7 @@ export default function PracticeSetup() {
     isModuleExam,
     isSubjectInModule,
     mode,
-    selectedSubheadingId,
+    selectedSubheadingName,
     selectedModuleSubheadingName,
   ]);
 
@@ -213,7 +270,7 @@ export default function PracticeSetup() {
     } else if (isModuleExam) {
       questions = await fetchPublishedModuleExam(block, moduleId, diff, selectedModuleSubheadingName || null);
     } else {
-      questions = await fetchPublishedBlock(subjectId, moduleId, block, diff, selectedSubheadingId || null);
+      questions = await fetchPublishedBlock(subjectId, moduleId, block, diff, null, selectedSubheadingName || null);
     }
     setLoading(false);
     if (questions.length === 0) return;
@@ -391,27 +448,33 @@ export default function PracticeSetup() {
         </div>
 
         {/* Subheading — 4th tier of the hierarchy, only shown when this Subject/Module has any */}
-        {isSubjectInModule && subheadings.length > 0 && (
+        {isSubjectInModule && (subheadings.length > 0 || !subheadingsLoaded) && (
           <div>
             <span className="mb-2 block text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
               Subheading
             </span>
-            <div className="flex flex-wrap gap-2">
-              <Pill t={t} tone="muted" active={selectedSubheadingId === ""} onClick={() => setSelectedSubheadingId("")}>
-                All Subheadings
-              </Pill>
-              {subheadings.map((s) => (
-                <Pill
-                  key={s.id}
-                  t={t}
-                  tone="teal"
-                  active={selectedSubheadingId === s.id}
-                  onClick={() => setSelectedSubheadingId(s.id)}
-                >
-                  {s.name}
+            {!subheadingsLoaded ? (
+              <span className="flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
+                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
+              </span>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Pill t={t} tone="muted" active={selectedSubheadingName === ""} onClick={() => setSelectedSubheadingName("")}>
+                  All Subheadings
                 </Pill>
-              ))}
-            </div>
+                {subheadings.map((s) => (
+                  <Pill
+                    key={s.name}
+                    t={t}
+                    tone="teal"
+                    active={selectedSubheadingName === s.name}
+                    onClick={() => setSelectedSubheadingName(s.name)}
+                  >
+                    {s.name}
+                  </Pill>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

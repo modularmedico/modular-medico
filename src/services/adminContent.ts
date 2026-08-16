@@ -264,7 +264,36 @@ export function subscribeSubheadings(
     cb([]);
     return () => {};
   }
-  const fallback = getLocalSubheadings(block, moduleId, subjectId);
+
+  // Merge Firestore results with whatever's cached locally, deduped by id first
+  // and then by name (case-insensitive) within this scope. Firestore alone isn't
+  // enough: createSubheading() always writes to localStorage even when the
+  // Firestore write also succeeds, and falls back to local-only if the write
+  // fails (offline, transient error, etc). Showing only the Firestore snapshot
+  // meant any subheading that only ever made it to localStorage — e.g. "Chapter
+  // 9" created while offline — would vanish the moment Firestore returned any
+  // results at all, e.g. once "Chapter 10" was saved successfully.
+  const emit = (fsList: SubheadingDoc[]) => {
+    const local = getLocalSubheadings(block, moduleId, subjectId);
+    const byId = new Map<string, SubheadingDoc>();
+    const nameKeys = new Set<string>();
+
+    fsList.forEach((s) => {
+      byId.set(s.id, s);
+      nameKeys.add(s.name.trim().toLowerCase());
+    });
+    local.forEach((s) => {
+      if (byId.has(s.id)) return;
+      const nameKey = s.name.trim().toLowerCase();
+      if (nameKeys.has(nameKey)) return; // same subheading already present from Firestore under a different id
+      byId.set(s.id, s);
+      nameKeys.add(nameKey);
+    });
+
+    const merged = Array.from(byId.values()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    setLocalSubheadings(block, moduleId, subjectId, merged);
+    cb(merged);
+  };
 
   const q = query(
     collection(db, "subheadings"),
@@ -275,19 +304,12 @@ export function subscribeSubheadings(
   return onSnapshot(
     q,
     (snap) => {
-      if (!snap.empty) {
-        const list = snap.docs
-          .map((d) => ({ id: d.id, ...(d.data() as Omit<SubheadingDoc, "id">) }))
-          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-        setLocalSubheadings(block, moduleId, subjectId, list);
-        cb(list);
-      } else {
-        cb(fallback);
-      }
+      const fsList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SubheadingDoc, "id">) }));
+      emit(fsList);
     },
     (err) => {
       console.warn("Firestore subheadings query fallback to local:", err.message);
-      cb(fallback);
+      emit([]);
     }
   );
 }
@@ -573,10 +595,17 @@ export async function fetchPublishedBlock(
   moduleId?: string,
   block?: number,
   difficulty?: Difficulty | "all",
-  subheadingId?: string | null
+  subheadingId?: string | null,
+  subheadingName?: string | null
 ): Promise<FirestoreQuestion[]> {
-  const applySubheadingFilter = (list: FirestoreQuestion[]) =>
-    subheadingId ? list.filter((item) => item.subheadingId === subheadingId) : list;
+  // Prefer matching by name when we have one — it's immune to id drift between
+  // Firestore and locally-cached subheading docs (see subscribeSubheadings),
+  // which was previously causing some subheadings' questions to never match.
+  const applySubheadingFilter = (list: FirestoreQuestion[]) => {
+    if (subheadingName) return list.filter((item) => (item.subheadingName || "").trim() === subheadingName.trim());
+    if (subheadingId) return list.filter((item) => item.subheadingId === subheadingId);
+    return list;
+  };
 
   try {
     const clauses = [
