@@ -19,6 +19,53 @@ const LOCAL_MODULES_KEY = "modular_medico_custom_modules";
 const LOCAL_BLOCKS_KEY = "modular_medico_custom_blocks";
 const LOCAL_SUBHEADINGS_KEY = "modular_medico_subheadings";
 
+/**
+ * Merge questions from the three sources (built-in defaults, locally-cached
+ * drafts, and live Firestore results) into one deduplicated list.
+ *
+ * IMPORTANT: real questions (local + Firestore) are deduped by their unique
+ * `id`, never by question text. Two different MCQs can legitimately share
+ * (or nearly share) the same wording — e.g. two questions saved under
+ * different subheadings — and deduping by text was collapsing all of them
+ * down to a single surviving question, which is why only one subheading (or
+ * far fewer MCQs than were actually saved) ever showed up.
+ *
+ * Only the built-in DEFAULT_QUESTIONS seed set is matched by text, since
+ * that's the one case where the same seed question can also exist as a
+ * Firestore/local doc (e.g. after being edited) and we want the saved
+ * version to win rather than showing both.
+ */
+function mergeQuestionSources(
+  defaults: FirestoreQuestion[],
+  local: FirestoreQuestion[],
+  firestore: FirestoreQuestion[]
+): FirestoreQuestion[] {
+  const byId = new Map<string, FirestoreQuestion>();
+  const realTextKeys = new Set<string>();
+
+  local.forEach((lq) => {
+    byId.set(lq.id, lq);
+    realTextKeys.add(lq.q.trim().toLowerCase());
+  });
+  firestore.forEach((fq) => {
+    byId.set(fq.id, fq);
+    realTextKeys.add(fq.q.trim().toLowerCase());
+  });
+
+  // Seed defaults only fill in where no real (saved) question already
+  // covers that exact text — they never overwrite or get overwritten by
+  // another default with the same id-less text key.
+  const result: FirestoreQuestion[] = Array.from(byId.values());
+  defaults.forEach((dq) => {
+    if (!realTextKeys.has(dq.q.trim().toLowerCase()) && !byId.has(dq.id)) {
+      result.push(dq);
+      byId.set(dq.id, dq);
+    }
+  });
+
+  return result;
+}
+
 function getLocalBlockDefinitions(): BlockDefinition[] | null {
   try {
     const raw = localStorage.getItem(LOCAL_BLOCKS_KEY);
@@ -463,45 +510,27 @@ export function subscribeSubjectQuestions(subjectId: string, cb: (questions: Fir
   return onSnapshot(
     q,
     (snap) => {
-      const fsQuestions = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
-      const defQuestions = DEFAULT_QUESTIONS.filter((dq) => dq.subjectId === subjectId);
-      const localQs = getLocalQuestions().filter((lq) => lq.subjectId === subjectId);
+      const fsQuestions = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim()));
+      const defQuestions = DEFAULT_QUESTIONS.filter(
+        (dq) => dq.subjectId === subjectId && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+      );
+      const localQs = getLocalQuestions().filter(
+        (lq) => lq.subjectId === subjectId && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+      );
 
-      const map = new Map<string, FirestoreQuestion>();
-      defQuestions.forEach((dq) => {
-        if (!deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())) {
-          map.set(dq.q.trim().toLowerCase(), dq);
-        }
-      });
-      localQs.forEach((lq) => {
-        if (!deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())) {
-          map.set(lq.q.trim().toLowerCase(), lq);
-        }
-      });
-      fsQuestions.forEach((fq) => {
-        if (!deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim())) {
-          map.set(fq.q.trim().toLowerCase(), fq);
-        }
-      });
-
-      cb(Array.from(map.values()));
+      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
     },
     (err) => {
       console.warn("Firestore subject questions fallback:", err.message);
-      const defQuestions = DEFAULT_QUESTIONS.filter((dq) => dq.subjectId === subjectId);
-      const localQs = getLocalQuestions().filter((lq) => lq.subjectId === subjectId);
-      const map = new Map<string, FirestoreQuestion>();
-      defQuestions.forEach((dq) => {
-        if (!deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())) {
-          map.set(dq.q.trim().toLowerCase(), dq);
-        }
-      });
-      localQs.forEach((lq) => {
-        if (!deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())) {
-          map.set(lq.q.trim().toLowerCase(), lq);
-        }
-      });
-      cb(Array.from(map.values()));
+      const defQuestions = DEFAULT_QUESTIONS.filter(
+        (dq) => dq.subjectId === subjectId && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+      );
+      const localQs = getLocalQuestions().filter(
+        (lq) => lq.subjectId === subjectId && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+      );
+      cb(mergeQuestionSources(defQuestions, localQs, []));
     }
   );
 }
@@ -512,44 +541,28 @@ export function subscribeAllQuestions(cb: (questions: FirestoreQuestion[]) => vo
     collection(db, "questions"),
     (snap) => {
       const deleted = getDeletedQuestionIds();
-      const fsQuestions = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
-      const localQs = getLocalQuestions();
+      const fsQuestions = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim()));
+      const localQs = getLocalQuestions().filter(
+        (lq) => !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+      );
+      const defQuestions = DEFAULT_QUESTIONS.filter(
+        (dq) => !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+      );
 
-      const map = new Map<string, FirestoreQuestion>();
-      DEFAULT_QUESTIONS.forEach((dq) => {
-        if (!deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())) {
-          map.set(dq.q.trim().toLowerCase(), dq);
-        }
-      });
-      localQs.forEach((lq) => {
-        if (!deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())) {
-          map.set(lq.q.trim().toLowerCase(), lq);
-        }
-      });
-      fsQuestions.forEach((fq) => {
-        if (!deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim())) {
-          map.set(fq.q.trim().toLowerCase(), fq);
-        }
-      });
-
-      cb(Array.from(map.values()));
+      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
     },
     (err) => {
       console.warn("Firestore all questions fallback:", err.message);
       const deleted = getDeletedQuestionIds();
-      const localQs = getLocalQuestions();
-      const map = new Map<string, FirestoreQuestion>();
-      DEFAULT_QUESTIONS.forEach((dq) => {
-        if (!deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())) {
-          map.set(dq.q.trim().toLowerCase(), dq);
-        }
-      });
-      localQs.forEach((lq) => {
-        if (!deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())) {
-          map.set(lq.q.trim().toLowerCase(), lq);
-        }
-      });
-      cb(Array.from(map.values()));
+      const localQs = getLocalQuestions().filter(
+        (lq) => !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+      );
+      const defQuestions = DEFAULT_QUESTIONS.filter(
+        (dq) => !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+      );
+      cb(mergeQuestionSources(defQuestions, localQs, []));
     }
   );
 }
@@ -602,12 +615,7 @@ export async function fetchPublishedBlock(
       return true;
     });
 
-    const map = new Map<string, FirestoreQuestion>();
-    defResults.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
-    localQs.forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
-    fsResults.forEach((fq) => map.set(fq.q.trim().toLowerCase(), fq));
-
-    const combined = applySubheadingFilter(Array.from(map.values()));
+    const combined = applySubheadingFilter(mergeQuestionSources(defResults, localQs, fsResults));
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedBlock failed, using default questions:", err);
@@ -666,12 +674,7 @@ export async function fetchPublishedModuleExam(
       return true;
     });
 
-    const map = new Map<string, FirestoreQuestion>();
-    defResults.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
-    localQs.forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
-    fsResults.forEach((fq) => map.set(fq.q.trim().toLowerCase(), fq));
-
-    const combined = applySubheadingFilter(Array.from(map.values()));
+    const combined = applySubheadingFilter(mergeQuestionSources(defResults, localQs, fsResults));
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedModuleExam failed, using default questions:", err);
@@ -716,12 +719,7 @@ export async function fetchPublishedBlockExam(
       return true;
     });
 
-    const map = new Map<string, FirestoreQuestion>();
-    defResults.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
-    localQs.forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
-    fsResults.forEach((fq) => map.set(fq.q.trim().toLowerCase(), fq));
-
-    const combined = Array.from(map.values());
+    const combined = mergeQuestionSources(defResults, localQs, fsResults);
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedBlockExam failed, using default questions:", err);
@@ -819,15 +817,10 @@ export function subscribeCurriculumCounts(cb: (counts: CurriculumCounts) => void
         if (s) subjectTotalCounts[s] = (subjectTotalCounts[s] || 0) + 1;
       };
 
-      const map = new Map<string, FirestoreQuestion>();
-      DEFAULT_QUESTIONS.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
-      getLocalQuestions().forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
-      snap.docs.forEach((d) => {
-        const item = { id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) };
-        map.set(item.q.trim().toLowerCase(), item);
-      });
+      const fsQuestions = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+      const merged = mergeQuestionSources(DEFAULT_QUESTIONS, getLocalQuestions(), fsQuestions);
 
-      Array.from(map.values()).forEach(processQuestion);
+      merged.forEach(processQuestion);
 
       cb({ blockCounts, moduleCounts, subjectInModuleCounts, subjectTotalCounts });
     },
@@ -838,11 +831,9 @@ export function subscribeCurriculumCounts(cb: (counts: CurriculumCounts) => void
       const subjectInModuleCounts: Record<string, number> = {};
       const subjectTotalCounts: Record<string, number> = {};
 
-      const map = new Map<string, FirestoreQuestion>();
-      DEFAULT_QUESTIONS.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
-      getLocalQuestions().forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
+      const merged = mergeQuestionSources(DEFAULT_QUESTIONS, getLocalQuestions(), []);
 
-      Array.from(map.values()).forEach((qItem) => {
+      merged.forEach((qItem) => {
         if (qItem.status !== "published") return;
         const b = qItem.block;
         const m = qItem.moduleId;
@@ -867,12 +858,7 @@ export async function searchGlobalQuestions(queryText: string): Promise<Firestor
     const localQs = getLocalQuestions().filter(lq => lq.status === "published");
     const defResults = DEFAULT_QUESTIONS.filter(dq => dq.status === "published");
     
-    const map = new Map<string, FirestoreQuestion>();
-    defResults.forEach(dq => map.set(dq.q.trim().toLowerCase(), dq));
-    localQs.forEach(lq => map.set(lq.q.trim().toLowerCase(), lq));
-    fsResults.forEach(fq => map.set(fq.q.trim().toLowerCase(), fq));
-    
-    const combined = Array.from(map.values());
+    const combined = mergeQuestionSources(defResults, localQs, fsResults);
     const lowerQuery = queryText.toLowerCase();
     
     return combined.filter(q => 

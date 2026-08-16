@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
+  ChevronRight,
   ArrowRight,
   Bookmark,
   BookmarkCheck,
@@ -13,6 +14,7 @@ import {
   ClipboardCopy,
   FlagOff,
   Monitor,
+  SkipForward,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
@@ -45,9 +47,20 @@ export default function Practice() {
   });
   const [isTimerPaused, setIsTimerPaused] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  const [showAddTime, setShowAddTime] = useState(false);
+  const [customMinutes, setCustomMinutes] = useState("");
+  const [showSkippedList, setShowSkippedList] = useState(false);
 
   const addTimeSeconds = (sec: number) => {
     setSecondsLeft((curr) => (curr === null ? sec : curr + sec));
+  };
+
+  const addCustomMinutes = () => {
+    const mins = Number(customMinutes);
+    if (!mins || mins <= 0) return;
+    addTimeSeconds(Math.round(mins * 60));
+    setCustomMinutes("");
+    setShowAddTime(false);
   };
 
   useEffect(() => {
@@ -65,6 +78,9 @@ export default function Practice() {
     const handler = (e: KeyboardEvent) => {
       if (["1", "2", "3", "4"].includes(e.key)) selectOption(Number(e.key) - 1);
       if (e.key === "Enter") (answered ? advance : submitAnswer)();
+      if ((e.key === "s" || e.key === "S") && !answered) skipQuestion();
+      if (e.key === "ArrowLeft") goBack();
+      if (e.key === "ArrowRight" && (answered || isOmr)) goForward();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -82,11 +98,17 @@ export default function Practice() {
     );
   }
 
-  const { setRef, config, queue, pos, record, bookmarked, requeueCount } = session;
+  const { setRef, config, queue, pos, record, bookmarked, requeueCount, skipped } = session;
   const isOmr = config.mode === "omr" || config.mode === "exam";
   const qIndex = queue[pos];
   const question = setRef.questions[qIndex];
   const totalSteps = queue.length;
+
+  // Every queue position whose question was explicitly skipped, in queue order —
+  // powers the "Review skipped" control so the learner can jump straight back to them.
+  const skippedPositions = queue
+    .map((qIdx, index) => ({ qIdx, index }))
+    .filter(({ qIdx }) => skipped[qIdx]);
 
   const selectOption = (i: number) => {
     if (!answered) setSelected(i);
@@ -96,6 +118,8 @@ export default function Practice() {
     if (selected === null || answered || finishing) return;
     const correct = selected === question.correct;
     const newRecord = { ...record, [qIndex]: { selected, correct } };
+    // Answering a previously-skipped question clears its skipped flag.
+    const newSkipped = skipped[qIndex] ? { ...skipped, [qIndex]: false } : skipped;
 
     // Spaced repetition: requeue a wrong answer, but only ONCE per question — this is
     // what guarantees the set always terminates instead of looping on a question the
@@ -110,7 +134,7 @@ export default function Practice() {
       newRequeueCount = { ...requeueCount, [qIndex]: (requeueCount[qIndex] || 0) + 1 };
     }
 
-    updateSession({ record: newRecord, queue: newQueue, requeueCount: newRequeueCount });
+    updateSession({ record: newRecord, queue: newQueue, requeueCount: newRequeueCount, skipped: newSkipped });
     if (isOmr) {
       advanceFrom(newQueue, newRecord);
     } else {
@@ -118,18 +142,59 @@ export default function Practice() {
     }
   };
 
+  // Loads whatever selection/answered state already exists for a queue position,
+  // so navigating with Back/Next/jump-to-skipped shows prior answers correctly
+  // instead of resetting the question to blank.
+  const loadPos = (newPos: number, rec: Record<number, AnswerRecord> = record) => {
+    const targetQIdx = queue[newPos];
+    const existing = rec[targetQIdx];
+    updateSession({ pos: newPos });
+    setSelected(existing?.selected ?? null);
+    setAnswered(!isOmr && !!existing && existing.selected !== null);
+    setCopied(false);
+  };
+
   const advanceFrom = (q: number[], rec: Record<number, AnswerRecord>) => {
     if (pos + 1 >= q.length) {
       finishNow(rec);
       return;
     }
-    updateSession({ pos: pos + 1 });
-    setSelected(null);
-    setAnswered(false);
-    setCopied(false);
+    loadPos(pos + 1, rec);
   };
 
   const advance = () => advanceFrom(queue, record);
+
+  // Move to the previous question in the queue, restoring its prior answer (if any)
+  // so the learner can review or change it.
+  const goBack = () => {
+    if (finishing || pos <= 0) return;
+    loadPos(pos - 1);
+  };
+
+  // Move forward one question without requiring the current one to be answered first —
+  // used for the explicit Next control once an answer has been given (or in OMR mode).
+  const goForward = () => {
+    if (finishing || pos + 1 >= totalSteps) return;
+    loadPos(pos + 1);
+  };
+
+  // Jump directly to an arbitrary queue position (e.g. from the "Review skipped" list).
+  const jumpToPos = (newPos: number) => {
+    if (finishing || newPos < 0 || newPos >= totalSteps) return;
+    loadPos(newPos);
+  };
+
+  // Skip the current question entirely — leaves it unanswered (not counted as
+  // right or wrong), flags it for the "Review skipped" list, and moves on.
+  // Doesn't trigger spaced-repetition requeueing, since the learner never
+  // attempted an answer to requeue.
+  const skipQuestion = () => {
+    if (finishing) return;
+    const newRecord = { ...record, [qIndex]: { selected: null, correct: false } };
+    const newSkipped = { ...skipped, [qIndex]: true };
+    updateSession({ record: newRecord, skipped: newSkipped });
+    advanceFrom(queue, newRecord);
+  };
 
   const finishNow = (rec: Record<number, AnswerRecord> = record) => {
     if (finishing) return;
@@ -183,6 +248,67 @@ export default function Practice() {
       <button onClick={() => finishNow()} title="End practice now and see results" className="flex items-center gap-1 text-xs font-bold" style={{ color: t.textFaint }}>
         <FlagOff size={13} /> End now
       </button>
+    </div>
+  );
+
+  // Lets the learner add an arbitrary number of minutes to the clock, in addition to
+  // the fixed +1m/+5m shortcuts. Shared between OMR/exam mode and traditional mode.
+  const AddTimeControl = (
+    <div className="flex items-center gap-1 ml-1 border-l pl-1.5" style={{ borderColor: t.border }}>
+      <button
+        onClick={() => addTimeSeconds(60)}
+        className="rounded px-1 text-[10px] font-bold hover:opacity-80"
+        style={{ backgroundColor: `${t.teal}20`, color: t.teal }}
+        title="Add 1 minute"
+      >
+        +1m
+      </button>
+      <button
+        onClick={() => addTimeSeconds(300)}
+        className="rounded px-1 text-[10px] font-bold hover:opacity-80"
+        style={{ backgroundColor: `${t.purple}20`, color: t.purple }}
+        title="Add 5 minutes"
+      >
+        +5m
+      </button>
+      <div className="relative">
+        <button
+          onClick={() => setShowAddTime((v) => !v)}
+          className="rounded px-1 text-[10px] font-bold hover:opacity-80"
+          style={{ backgroundColor: `${t.gold}20`, color: t.gold }}
+          title="Add custom minutes"
+        >
+          +min
+        </button>
+        {showAddTime && (
+          <div
+            className="absolute right-0 top-full z-20 mt-1.5 flex items-center gap-1 rounded-xl p-1.5 shadow-lg"
+            style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+          >
+            <input
+              type="number"
+              min={1}
+              autoFocus
+              value={customMinutes}
+              onChange={(e) => setCustomMinutes(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addCustomMinutes();
+                if (e.key === "Escape") setShowAddTime(false);
+              }}
+              placeholder="min"
+              className="w-14 rounded-lg px-2 py-1 text-xs outline-none"
+              style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text, fontFamily: FONT_MONO }}
+            />
+            <button
+              onClick={addCustomMinutes}
+              className="rounded-lg px-2 py-1 text-[10px] font-bold"
+              style={{ backgroundColor: t.teal, color: "#fff" }}
+            >
+              Add
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -271,16 +397,7 @@ export default function Practice() {
                     <Clock size={12} className="mr-1 inline" />
                     {mm}:{ss}
                   </span>
-                  {config.mode !== "exam" && (
-                    <button
-                      onClick={() => addTimeSeconds(60)}
-                      className="rounded px-1.5 py-0.5 text-[10px] font-bold hover:opacity-80"
-                      style={{ backgroundColor: `${t.teal}20`, color: t.teal }}
-                      title="Add 1 minute"
-                    >
-                      +1m
-                    </button>
-                  )}
+                  {config.mode !== "exam" && AddTimeControl}
                 </div>
               ) : (
                 <span style={{ fontFamily: FONT_MONO, fontSize: 12, color: t.textFaint }}>Untimed</span>
@@ -292,7 +409,7 @@ export default function Practice() {
                  const q = setRef.questions[qIdx];
                  const selectedOption = record[qIdx]?.selected ?? null;
                  return (
-                   <div key={qIdx} className="flex items-center gap-4 h-[40px]">
+                   <div key={qIdx} id={`bubble-row-${index}`} className="flex items-center gap-4 h-[40px]">
                      <span className="w-6 text-right text-sm font-bold" style={{ color: t.textFaint, fontFamily: FONT_MONO }}>{index + 1}.</span>
                      <div className="flex gap-2">
                        {q.options.map((_, i) => (
@@ -300,7 +417,8 @@ export default function Practice() {
                            key={i}
                            onClick={() => {
                              if (finishing) return;
-                             updateSession({ record: { ...record, [qIdx]: { selected: i, correct: i === q.correct } } });
+                             const newSkipped = skipped[qIdx] ? { ...skipped, [qIdx]: false } : skipped;
+                             updateSession({ record: { ...record, [qIdx]: { selected: i, correct: i === q.correct } }, skipped: newSkipped });
                            }}
                            className="w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all hover:scale-105"
                            style={{ 
@@ -315,6 +433,20 @@ export default function Practice() {
                            {String.fromCharCode(65 + i)}
                          </button>
                        ))}
+                       <button
+                         onClick={() => {
+                           if (finishing) return;
+                           updateSession({ skipped: { ...skipped, [qIdx]: true } });
+                         }}
+                         className="ml-1 flex h-8 items-center gap-1 rounded-full px-2 text-[10px] font-bold transition-all hover:opacity-80"
+                         style={{
+                           border: `1.5px solid ${skipped[qIdx] ? t.gold : t.border}`,
+                           color: skipped[qIdx] ? t.gold : t.textFaint,
+                         }}
+                         title="Flag this question to review later"
+                       >
+                         <SkipForward size={11} /> {skipped[qIdx] ? "Flagged" : "Skip"}
+                       </button>
                      </div>
                    </div>
                  );
@@ -324,7 +456,20 @@ export default function Practice() {
             <div className="p-4 border-t flex flex-col gap-2" style={{ borderColor: t.border, backgroundColor: t.surfaceAlt }}>
               <div className="flex justify-between text-xs mb-1" style={{ color: t.textFaint, fontFamily: FONT_MONO }}>
                 <span>Answered: {Object.values(record).filter(r => r && r.selected !== null).length}/{totalSteps}</span>
+                {skippedPositions.length > 0 && <span style={{ color: t.gold }}>Skipped: {skippedPositions.length}</span>}
               </div>
+              {skippedPositions.length > 0 && (
+                <button
+                  onClick={() => {
+                    const el = document.getElementById(`bubble-row-${skippedPositions[0].index}`);
+                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }}
+                  className="mb-1 flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold"
+                  style={{ backgroundColor: `${t.gold}18`, color: t.gold }}
+                >
+                  <SkipForward size={13} /> Review {skippedPositions.length} skipped
+                </button>
+              )}
               <Btn t={t} full onClick={() => finishNow()} disabled={finishing}>
                 Submit Exam
               </Btn>
@@ -351,26 +496,7 @@ export default function Practice() {
                 <Clock size={12} className="mr-1 inline" />
                 {mm}:{ss}
               </span>
-              {config.mode !== "exam" && (
-                <div className="flex items-center gap-1 ml-1 border-l pl-1.5" style={{ borderColor: t.border }}>
-                  <button
-                    onClick={() => addTimeSeconds(60)}
-                    className="rounded px-1 text-[10px] font-bold hover:opacity-80"
-                    style={{ backgroundColor: `${t.teal}20`, color: t.teal }}
-                    title="Add 1 minute"
-                  >
-                    +1m
-                  </button>
-                  <button
-                    onClick={() => addTimeSeconds(300)}
-                    className="rounded px-1 text-[10px] font-bold hover:opacity-80"
-                    style={{ backgroundColor: `${t.purple}20`, color: t.purple }}
-                    title="Add 5 minutes"
-                  >
-                    +5m
-                  </button>
-                </div>
-              )}
+              {config.mode !== "exam" && AddTimeControl}
             </div>
           )}
           {!mm && ExitAndFinishBar}
@@ -384,10 +510,44 @@ export default function Practice() {
         <div className="h-full rounded-full transition-all" style={{ width: `${(pos / totalSteps) * 100}%`, backgroundColor: t.teal }} />
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Pill t={t} tone="muted">{SUBJECT_META[setRef.subjectId as keyof typeof SUBJECT_META]?.label || "Quiz"}</Pill>
         <Pill t={t} tone="purple">{setRef.moduleName} \u00b7 Block {setRef.block}</Pill>
         {requeueCount[qIndex] > 0 && <Pill t={t} tone="gold">Review</Pill>}
+        {skippedPositions.length > 0 && (
+          <div className="relative ml-auto">
+            <button
+              onClick={() => setShowSkippedList((v) => !v)}
+              className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold"
+              style={{ backgroundColor: `${t.gold}18`, color: t.gold }}
+            >
+              <SkipForward size={12} /> {skippedPositions.length} skipped
+            </button>
+            {showSkippedList && (
+              <div
+                className="absolute right-0 top-full z-20 mt-1.5 w-64 max-h-64 overflow-y-auto rounded-2xl p-1.5 shadow-lg"
+                style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+              >
+                {skippedPositions.map(({ qIdx, index }) => (
+                  <button
+                    key={qIdx}
+                    onClick={() => {
+                      jumpToPos(index);
+                      setShowSkippedList(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs hover:opacity-80"
+                    style={{ color: t.text }}
+                  >
+                    <span className="shrink-0 font-bold" style={{ color: t.gold, fontFamily: FONT_MONO }}>
+                      Q{index + 1}
+                    </span>
+                    <span className="truncate" style={{ color: t.textMuted }}>{setRef.questions[qIdx].q}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <Card t={t} style={{ padding: 24 }}>
@@ -449,19 +609,53 @@ export default function Practice() {
         )}
       </Card>
 
-      <div className="flex justify-end">
-        {!answered ? (
-          <Btn t={t} onClick={submitAnswer} disabled={selected === null}>
-            Submit answer
-          </Btn>
-        ) : (
-          <Btn t={t} onClick={advance} icon={ArrowRight}>
-            {pos + 1 >= totalSteps ? "See results" : "Next question"}
-          </Btn>
-        )}
+      <div className="flex items-center justify-between gap-3">
+        <button
+          onClick={goBack}
+          disabled={pos === 0 || finishing}
+          className="flex items-center gap-1 text-sm font-bold disabled:opacity-30"
+          style={{ color: t.textMuted }}
+          title="Go to the previous question"
+        >
+          <ChevronLeft size={16} /> Back
+        </button>
+
+        <div className="flex items-center gap-3">
+          {!answered && (
+            <button
+              onClick={skipQuestion}
+              disabled={finishing}
+              className="flex items-center gap-1 text-sm font-bold"
+              style={{ color: t.textFaint }}
+              title="Move on without answering this question"
+            >
+              <SkipForward size={14} /> Skip
+            </button>
+          )}
+          {answered && pos + 1 < totalSteps && (
+            <button
+              onClick={goForward}
+              disabled={finishing}
+              className="flex items-center gap-1 text-sm font-bold"
+              style={{ color: t.textFaint }}
+              title="Go to the next question"
+            >
+              Next <ChevronRight size={16} />
+            </button>
+          )}
+          {!answered ? (
+            <Btn t={t} onClick={submitAnswer} disabled={selected === null}>
+              Submit answer
+            </Btn>
+          ) : (
+            <Btn t={t} onClick={advance} icon={ArrowRight}>
+              {pos + 1 >= totalSteps ? "See results" : "Next question"}
+            </Btn>
+          )}
+        </div>
       </div>
       <p className="hidden text-center text-xs md:block" style={{ color: t.textFaint }}>
-        Keyboard: 1\u20134 to select \u00b7 Enter to submit / continue
+        Keyboard: 1\u20134 to select \u00b7 Enter to submit / continue \u00b7 S to skip \u00b7 \u2190 back \u00b7 \u2192 next
       </p>
     </div>
   );
