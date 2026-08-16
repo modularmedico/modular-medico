@@ -20,7 +20,6 @@ import {
   RefreshCw,
   ListTree,
   X,
-  Loader2,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
@@ -107,7 +106,6 @@ export default function AdminPanel() {
   /* HIERARCHY: Block -> Module -> Subject -> Subheading                       */
   /* ------------------------------------------------------------------------- */
   const [subheadings, setSubheadings] = useState<SubheadingDoc[]>([]);
-  const [subheadingsLoading, setSubheadingsLoading] = useState(true);
   const [selectedSubheadingId, setSelectedSubheadingId] = useState<string>("");
   const [newSubheadingName, setNewSubheadingName] = useState("");
   const [creatingSubheading, setCreatingSubheading] = useState(false);
@@ -149,11 +147,7 @@ export default function AdminPanel() {
   useEffect(() => {
     setSelectedSubheadingId("");
     setNewSubheadingName("");
-    setSubheadingsLoading(true);
-    const unsub = subscribeSubheadings(effectiveBlock, effectiveModuleId, subjectId, (list) => {
-      setSubheadings(list);
-      setSubheadingsLoading(false);
-    });
+    const unsub = subscribeSubheadings(effectiveBlock, effectiveModuleId, subjectId, setSubheadings);
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveBlock, effectiveModuleId, subjectId]);
@@ -648,36 +642,30 @@ export default function AdminPanel() {
               </div>
 
               {/* Previously used subheadings in this scope, for quick reuse or removal */}
-              {subheadingsLoading ? (
-                <div className="mt-3 flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
-                  <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
-                </div>
-              ) : (
-                subheadings.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {subheadings.map((s) => (
-                      <Pill
-                        key={s.id}
-                        t={t}
-                        tone="teal"
-                        active={selectedSubheadingId === s.id}
-                        onClick={() => {
-                          setSelectedSubheadingId(s.id);
-                          setNewSubheadingName("");
+              {subheadings.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {subheadings.map((s) => (
+                    <Pill
+                      key={s.id}
+                      t={t}
+                      tone="teal"
+                      active={selectedSubheadingId === s.id}
+                      onClick={() => {
+                        setSelectedSubheadingId(s.id);
+                        setNewSubheadingName("");
+                      }}
+                    >
+                      {s.name}
+                      <X
+                        size={11}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteSubheading(s);
                         }}
-                      >
-                        {s.name}
-                        <X
-                          size={11}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteSubheading(s);
-                          }}
-                        />
-                      </Pill>
-                    ))}
-                  </div>
-                )
+                      />
+                    </Pill>
+                  ))}
+                </div>
               )}
             </div>
 
@@ -1098,26 +1086,17 @@ export default function AdminPanel() {
                   <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
                     Subheading
                   </label>
-                  {loadingQuestions ? (
-                    <div
-                      className="flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                      style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.textFaint }}
-                    >
-                      <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
-                    </div>
-                  ) : (
-                    <select
-                      value={filterSubheading}
-                      onChange={(e) => setFilterSubheading(e.target.value)}
-                      className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
-                      style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
-                    >
-                      <option value="all">All Subheadings</option>
-                      {availableSubheadingNames.map((name) => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
-                    </select>
-                  )}
+                  <select
+                    value={filterSubheading}
+                    onChange={(e) => setFilterSubheading(e.target.value)}
+                    className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  >
+                    <option value="all">All Subheadings</option>
+                    {availableSubheadingNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>
