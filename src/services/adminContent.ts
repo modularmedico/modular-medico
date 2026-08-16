@@ -883,6 +883,51 @@ export function subscribeModuleBlockCounts(subjectId: string, moduleId: string, 
   );
 }
 
+/**
+ * Live view of every *published* question across the whole curriculum.
+ *
+ * Unlike subscribeAllQuestions() (admin-only bank listing), this is safe for
+ * regular students/guests to call: the Firestore query itself is scoped with
+ * where("status","==","published"), which satisfies the security rule
+ * (`resource.data.status == 'published' || isAdmin()`) for every document it
+ * can possibly return. subscribeAllQuestions() has no such filter, so
+ * Firestore denies that *entire* unfiltered listing for any non-admin the
+ * moment a single draft exists anywhere in the collection — which is exactly
+ * why student-facing pages must not use it to build their module/subject
+ * breakdowns (only the admin Manage MCQs & Bank screen should).
+ */
+export function subscribePublishedQuestions(cb: (questions: FirestoreQuestion[]) => void) {
+  const q = query(collection(db, "questions"), where("status", "==", "published"));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const deleted = getDeletedQuestionIds();
+      const fsQuestions = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim()));
+      const localQs = getLocalQuestions().filter(
+        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+      );
+      const defQuestions = DEFAULT_QUESTIONS.filter(
+        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+      );
+
+      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
+    },
+    (err) => {
+      console.warn("Firestore published questions fallback:", err.message);
+      const deleted = getDeletedQuestionIds();
+      const localQs = getLocalQuestions().filter(
+        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+      );
+      const defQuestions = DEFAULT_QUESTIONS.filter(
+        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+      );
+      cb(mergeQuestionSources(defQuestions, localQs, []));
+    }
+  );
+}
+
 export interface CurriculumCounts {
   blockCounts: Record<number, number>;
   moduleCounts: Record<string, number>; // key: `${block}-${moduleId}`
