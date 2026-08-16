@@ -19,53 +19,6 @@ const LOCAL_MODULES_KEY = "modular_medico_custom_modules";
 const LOCAL_BLOCKS_KEY = "modular_medico_custom_blocks";
 const LOCAL_SUBHEADINGS_KEY = "modular_medico_subheadings";
 
-/**
- * Merge questions from the three sources (built-in defaults, locally-cached
- * drafts, and live Firestore results) into one deduplicated list.
- *
- * IMPORTANT: real questions (local + Firestore) are deduped by their unique
- * `id`, never by question text. Two different MCQs can legitimately share
- * (or nearly share) the same wording — e.g. two questions saved under
- * different subheadings — and deduping by text was collapsing all of them
- * down to a single surviving question, which is why only one subheading (or
- * far fewer MCQs than were actually saved) ever showed up.
- *
- * Only the built-in DEFAULT_QUESTIONS seed set is matched by text, since
- * that's the one case where the same seed question can also exist as a
- * Firestore/local doc (e.g. after being edited) and we want the saved
- * version to win rather than showing both.
- */
-function mergeQuestionSources(
-  defaults: FirestoreQuestion[],
-  local: FirestoreQuestion[],
-  firestore: FirestoreQuestion[]
-): FirestoreQuestion[] {
-  const byId = new Map<string, FirestoreQuestion>();
-  const realTextKeys = new Set<string>();
-
-  local.forEach((lq) => {
-    byId.set(lq.id, lq);
-    realTextKeys.add(lq.q.trim().toLowerCase());
-  });
-  firestore.forEach((fq) => {
-    byId.set(fq.id, fq);
-    realTextKeys.add(fq.q.trim().toLowerCase());
-  });
-
-  // Seed defaults only fill in where no real (saved) question already
-  // covers that exact text — they never overwrite or get overwritten by
-  // another default with the same id-less text key.
-  const result: FirestoreQuestion[] = Array.from(byId.values());
-  defaults.forEach((dq) => {
-    if (!realTextKeys.has(dq.q.trim().toLowerCase()) && !byId.has(dq.id)) {
-      result.push(dq);
-      byId.set(dq.id, dq);
-    }
-  });
-
-  return result;
-}
-
 function getLocalBlockDefinitions(): BlockDefinition[] | null {
   try {
     const raw = localStorage.getItem(LOCAL_BLOCKS_KEY);
@@ -264,36 +217,7 @@ export function subscribeSubheadings(
     cb([]);
     return () => {};
   }
-
-  // Merge Firestore results with whatever's cached locally, deduped by id first
-  // and then by name (case-insensitive) within this scope. Firestore alone isn't
-  // enough: createSubheading() always writes to localStorage even when the
-  // Firestore write also succeeds, and falls back to local-only if the write
-  // fails (offline, transient error, etc). Showing only the Firestore snapshot
-  // meant any subheading that only ever made it to localStorage — e.g. "Chapter
-  // 9" created while offline — would vanish the moment Firestore returned any
-  // results at all, e.g. once "Chapter 10" was saved successfully.
-  const emit = (fsList: SubheadingDoc[]) => {
-    const local = getLocalSubheadings(block, moduleId, subjectId);
-    const byId = new Map<string, SubheadingDoc>();
-    const nameKeys = new Set<string>();
-
-    fsList.forEach((s) => {
-      byId.set(s.id, s);
-      nameKeys.add(s.name.trim().toLowerCase());
-    });
-    local.forEach((s) => {
-      if (byId.has(s.id)) return;
-      const nameKey = s.name.trim().toLowerCase();
-      if (nameKeys.has(nameKey)) return; // same subheading already present from Firestore under a different id
-      byId.set(s.id, s);
-      nameKeys.add(nameKey);
-    });
-
-    const merged = Array.from(byId.values()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    setLocalSubheadings(block, moduleId, subjectId, merged);
-    cb(merged);
-  };
+  const fallback = getLocalSubheadings(block, moduleId, subjectId);
 
   const q = query(
     collection(db, "subheadings"),
@@ -304,12 +228,19 @@ export function subscribeSubheadings(
   return onSnapshot(
     q,
     (snap) => {
-      const fsList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SubheadingDoc, "id">) }));
-      emit(fsList);
+      if (!snap.empty) {
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as Omit<SubheadingDoc, "id">) }))
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        setLocalSubheadings(block, moduleId, subjectId, list);
+        cb(list);
+      } else {
+        cb(fallback);
+      }
     },
     (err) => {
       console.warn("Firestore subheadings query fallback to local:", err.message);
-      emit([]);
+      cb(fallback);
     }
   );
 }
@@ -394,29 +325,7 @@ export interface QuestionInput {
   status?: QuestionStatus;
 }
 
-/**
- * Result of a save attempt. `source` tells the caller (and the UI) whether the
- * MCQ(s) actually made it to Firestore — where they're visible in Manage MCQs &
- * Bank, to other admins, and to students — or only got cached in this browser's
- * localStorage because the Firestore write was rejected.
- *
- * `reason: "permission-denied"` specifically means the signed-in account does not
- * carry the real `admin` custom claim that Firestore rules require (see
- * scripts/setAdminClaim.mjs) — the in-app "Enter Admin" screen only gates the UI,
- * it can't grant that claim. Any other reason is most likely a connectivity issue.
- */
-export type SaveResult =
-  | { source: "firestore" }
-  | { source: "local"; reason: "permission-denied" | "offline" | "unknown"; message: string };
-
-function classifyWriteError(err: unknown): "permission-denied" | "offline" | "unknown" {
-  const code = (err as { code?: string } | null)?.code;
-  if (code === "permission-denied") return "permission-denied";
-  if (code === "unavailable" || (typeof navigator !== "undefined" && !navigator.onLine)) return "offline";
-  return "unknown";
-}
-
-export async function addQuestion(input: QuestionInput): Promise<SaveResult> {
+export async function addQuestion(input: QuestionInput) {
   const cleanInput = {
     ...input,
     status: input.status ?? "draft",
@@ -424,27 +333,15 @@ export async function addQuestion(input: QuestionInput): Promise<SaveResult> {
   };
   try {
     await addDoc(collection(db, "questions"), cleanInput);
-    return { source: "firestore" };
   } catch (err) {
     console.warn("Firestore addQuestion failed, appending to local store:", err);
     const localQuestions: FirestoreQuestion[] = JSON.parse(localStorage.getItem("modular_medico_local_qs") || "[]");
     localQuestions.push({ id: `local-${Date.now()}-${Math.random()}`, ...cleanInput });
     localStorage.setItem("modular_medico_local_qs", JSON.stringify(localQuestions));
-    const reason = classifyWriteError(err);
-    return {
-      source: "local",
-      reason,
-      message:
-        reason === "permission-denied"
-          ? "Your account isn't a real Firestore admin yet, so this only saved to this browser — it won't show in Manage MCQs & Bank on other devices or for students. Run scripts/setAdminClaim.mjs to fix this."
-          : reason === "offline"
-          ? "You appear to be offline — this was cached locally and needs a real save once you're back online."
-          : "Firestore rejected this write for an unknown reason — this only saved to this browser.",
-    };
   }
 }
 
-export async function bulkAddQuestions(inputs: QuestionInput[]): Promise<SaveResult> {
+export async function bulkAddQuestions(inputs: QuestionInput[]) {
   try {
     const batch = writeBatch(db);
     inputs.forEach((input) => {
@@ -452,7 +349,6 @@ export async function bulkAddQuestions(inputs: QuestionInput[]): Promise<SaveRes
       batch.set(ref, { ...input, status: input.status ?? "draft", createdAt: Date.now() });
     });
     await batch.commit();
-    return { source: "firestore" };
   } catch (err) {
     console.warn("Firestore bulkAddQuestions failed, storing locally:", err);
     const localQuestions: FirestoreQuestion[] = JSON.parse(localStorage.getItem("modular_medico_local_qs") || "[]");
@@ -465,17 +361,6 @@ export async function bulkAddQuestions(inputs: QuestionInput[]): Promise<SaveRes
       });
     });
     localStorage.setItem("modular_medico_local_qs", JSON.stringify(localQuestions));
-    const reason = classifyWriteError(err);
-    return {
-      source: "local",
-      reason,
-      message:
-        reason === "permission-denied"
-          ? "Your account isn't a real Firestore admin yet, so these only saved to this browser — they won't show in Manage MCQs & Bank on other devices or for students. Run scripts/setAdminClaim.mjs to fix this."
-          : reason === "offline"
-          ? "You appear to be offline — these were cached locally and need a real save once you're back online."
-          : "Firestore rejected this write for an unknown reason — these only saved to this browser.",
-    };
   }
 }
 
@@ -578,80 +463,93 @@ export function subscribeSubjectQuestions(subjectId: string, cb: (questions: Fir
   return onSnapshot(
     q,
     (snap) => {
-      const fsQuestions = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
-        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim()));
-      const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.subjectId === subjectId && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
-      );
-      const localQs = getLocalQuestions().filter(
-        (lq) => lq.subjectId === subjectId && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
-      );
+      const fsQuestions = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+      const defQuestions = DEFAULT_QUESTIONS.filter((dq) => dq.subjectId === subjectId);
+      const localQs = getLocalQuestions().filter((lq) => lq.subjectId === subjectId);
 
-      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
+      const map = new Map<string, FirestoreQuestion>();
+      defQuestions.forEach((dq) => {
+        if (!deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())) {
+          map.set(dq.q.trim().toLowerCase(), dq);
+        }
+      });
+      localQs.forEach((lq) => {
+        if (!deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())) {
+          map.set(lq.q.trim().toLowerCase(), lq);
+        }
+      });
+      fsQuestions.forEach((fq) => {
+        if (!deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim())) {
+          map.set(fq.q.trim().toLowerCase(), fq);
+        }
+      });
+
+      cb(Array.from(map.values()));
     },
     (err) => {
       console.warn("Firestore subject questions fallback:", err.message);
-      const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.subjectId === subjectId && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
-      );
-      const localQs = getLocalQuestions().filter(
-        (lq) => lq.subjectId === subjectId && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
-      );
-      cb(mergeQuestionSources(defQuestions, localQs, []));
+      const defQuestions = DEFAULT_QUESTIONS.filter((dq) => dq.subjectId === subjectId);
+      const localQs = getLocalQuestions().filter((lq) => lq.subjectId === subjectId);
+      const map = new Map<string, FirestoreQuestion>();
+      defQuestions.forEach((dq) => {
+        if (!deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())) {
+          map.set(dq.q.trim().toLowerCase(), dq);
+        }
+      });
+      localQs.forEach((lq) => {
+        if (!deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())) {
+          map.set(lq.q.trim().toLowerCase(), lq);
+        }
+      });
+      cb(Array.from(map.values()));
     }
   );
 }
 
-/**
- * Live view of every question in the bank (all statuses). This is an unconstrained
- * query, so Firestore rules require the caller to be a real admin (custom claim) —
- * a signed-in user without that claim gets permission-denied for the *entire*
- * listing, even for their own published questions. When that happens we still fall
- * back to local + default questions so the screen isn't blank, but we also report
- * the failure via `onError` so the UI can tell the admin their view is incomplete
- * rather than silently showing 0 results as if the bank were actually empty.
- */
-export function subscribeAllQuestions(
-  cb: (questions: FirestoreQuestion[]) => void,
-  onError?: (reason: "permission-denied" | "offline" | "unknown", message: string) => void
-) {
+/** Live view of every question in the bank */
+export function subscribeAllQuestions(cb: (questions: FirestoreQuestion[]) => void) {
   return onSnapshot(
     collection(db, "questions"),
     (snap) => {
       const deleted = getDeletedQuestionIds();
-      const fsQuestions = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
-        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim()));
-      const localQs = getLocalQuestions().filter(
-        (lq) => !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
-      );
-      const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
-      );
+      const fsQuestions = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+      const localQs = getLocalQuestions();
 
-      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
+      const map = new Map<string, FirestoreQuestion>();
+      DEFAULT_QUESTIONS.forEach((dq) => {
+        if (!deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())) {
+          map.set(dq.q.trim().toLowerCase(), dq);
+        }
+      });
+      localQs.forEach((lq) => {
+        if (!deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())) {
+          map.set(lq.q.trim().toLowerCase(), lq);
+        }
+      });
+      fsQuestions.forEach((fq) => {
+        if (!deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim())) {
+          map.set(fq.q.trim().toLowerCase(), fq);
+        }
+      });
+
+      cb(Array.from(map.values()));
     },
     (err) => {
       console.warn("Firestore all questions fallback:", err.message);
       const deleted = getDeletedQuestionIds();
-      const localQs = getLocalQuestions().filter(
-        (lq) => !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
-      );
-      const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
-      );
-      cb(mergeQuestionSources(defQuestions, localQs, []));
-
-      const reason = classifyWriteError(err);
-      onError?.(
-        reason,
-        reason === "permission-denied"
-          ? "Your account isn't a real Firestore admin yet, so the bank can't be listed — you're only seeing MCQs cached in this browser. Run scripts/setAdminClaim.mjs to fix this."
-          : reason === "offline"
-          ? "You appear to be offline — only locally cached MCQs are shown."
-          : "Couldn't load the full MCQ bank from Firestore — only locally cached MCQs are shown."
-      );
+      const localQs = getLocalQuestions();
+      const map = new Map<string, FirestoreQuestion>();
+      DEFAULT_QUESTIONS.forEach((dq) => {
+        if (!deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())) {
+          map.set(dq.q.trim().toLowerCase(), dq);
+        }
+      });
+      localQs.forEach((lq) => {
+        if (!deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())) {
+          map.set(lq.q.trim().toLowerCase(), lq);
+        }
+      });
+      cb(Array.from(map.values()));
     }
   );
 }
@@ -662,17 +560,10 @@ export async function fetchPublishedBlock(
   moduleId?: string,
   block?: number,
   difficulty?: Difficulty | "all",
-  subheadingId?: string | null,
-  subheadingName?: string | null
+  subheadingId?: string | null
 ): Promise<FirestoreQuestion[]> {
-  // Prefer matching by name when we have one — it's immune to id drift between
-  // Firestore and locally-cached subheading docs (see subscribeSubheadings),
-  // which was previously causing some subheadings' questions to never match.
-  const applySubheadingFilter = (list: FirestoreQuestion[]) => {
-    if (subheadingName) return list.filter((item) => (item.subheadingName || "").trim() === subheadingName.trim());
-    if (subheadingId) return list.filter((item) => item.subheadingId === subheadingId);
-    return list;
-  };
+  const applySubheadingFilter = (list: FirestoreQuestion[]) =>
+    subheadingId ? list.filter((item) => item.subheadingId === subheadingId) : list;
 
   try {
     const clauses = [
@@ -711,7 +602,12 @@ export async function fetchPublishedBlock(
       return true;
     });
 
-    const combined = applySubheadingFilter(mergeQuestionSources(defResults, localQs, fsResults));
+    const map = new Map<string, FirestoreQuestion>();
+    defResults.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
+    localQs.forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
+    fsResults.forEach((fq) => map.set(fq.q.trim().toLowerCase(), fq));
+
+    const combined = applySubheadingFilter(Array.from(map.values()));
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedBlock failed, using default questions:", err);
@@ -770,7 +666,12 @@ export async function fetchPublishedModuleExam(
       return true;
     });
 
-    const combined = applySubheadingFilter(mergeQuestionSources(defResults, localQs, fsResults));
+    const map = new Map<string, FirestoreQuestion>();
+    defResults.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
+    localQs.forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
+    fsResults.forEach((fq) => map.set(fq.q.trim().toLowerCase(), fq));
+
+    const combined = applySubheadingFilter(Array.from(map.values()));
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedModuleExam failed, using default questions:", err);
@@ -815,7 +716,12 @@ export async function fetchPublishedBlockExam(
       return true;
     });
 
-    const combined = mergeQuestionSources(defResults, localQs, fsResults);
+    const map = new Map<string, FirestoreQuestion>();
+    defResults.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
+    localQs.forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
+    fsResults.forEach((fq) => map.set(fq.q.trim().toLowerCase(), fq));
+
+    const combined = Array.from(map.values());
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedBlockExam failed, using default questions:", err);
@@ -883,51 +789,6 @@ export function subscribeModuleBlockCounts(subjectId: string, moduleId: string, 
   );
 }
 
-/**
- * Live view of every *published* question across the whole curriculum.
- *
- * Unlike subscribeAllQuestions() (admin-only bank listing), this is safe for
- * regular students/guests to call: the Firestore query itself is scoped with
- * where("status","==","published"), which satisfies the security rule
- * (`resource.data.status == 'published' || isAdmin()`) for every document it
- * can possibly return. subscribeAllQuestions() has no such filter, so
- * Firestore denies that *entire* unfiltered listing for any non-admin the
- * moment a single draft exists anywhere in the collection — which is exactly
- * why student-facing pages must not use it to build their module/subject
- * breakdowns (only the admin Manage MCQs & Bank screen should).
- */
-export function subscribePublishedQuestions(cb: (questions: FirestoreQuestion[]) => void) {
-  const q = query(collection(db, "questions"), where("status", "==", "published"));
-  return onSnapshot(
-    q,
-    (snap) => {
-      const deleted = getDeletedQuestionIds();
-      const fsQuestions = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
-        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim()));
-      const localQs = getLocalQuestions().filter(
-        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
-      );
-      const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
-      );
-
-      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
-    },
-    (err) => {
-      console.warn("Firestore published questions fallback:", err.message);
-      const deleted = getDeletedQuestionIds();
-      const localQs = getLocalQuestions().filter(
-        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
-      );
-      const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
-      );
-      cb(mergeQuestionSources(defQuestions, localQs, []));
-    }
-  );
-}
-
 export interface CurriculumCounts {
   blockCounts: Record<number, number>;
   moduleCounts: Record<string, number>; // key: `${block}-${moduleId}`
@@ -958,10 +819,15 @@ export function subscribeCurriculumCounts(cb: (counts: CurriculumCounts) => void
         if (s) subjectTotalCounts[s] = (subjectTotalCounts[s] || 0) + 1;
       };
 
-      const fsQuestions = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
-      const merged = mergeQuestionSources(DEFAULT_QUESTIONS, getLocalQuestions(), fsQuestions);
+      const map = new Map<string, FirestoreQuestion>();
+      DEFAULT_QUESTIONS.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
+      getLocalQuestions().forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
+      snap.docs.forEach((d) => {
+        const item = { id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) };
+        map.set(item.q.trim().toLowerCase(), item);
+      });
 
-      merged.forEach(processQuestion);
+      Array.from(map.values()).forEach(processQuestion);
 
       cb({ blockCounts, moduleCounts, subjectInModuleCounts, subjectTotalCounts });
     },
@@ -972,9 +838,11 @@ export function subscribeCurriculumCounts(cb: (counts: CurriculumCounts) => void
       const subjectInModuleCounts: Record<string, number> = {};
       const subjectTotalCounts: Record<string, number> = {};
 
-      const merged = mergeQuestionSources(DEFAULT_QUESTIONS, getLocalQuestions(), []);
+      const map = new Map<string, FirestoreQuestion>();
+      DEFAULT_QUESTIONS.forEach((dq) => map.set(dq.q.trim().toLowerCase(), dq));
+      getLocalQuestions().forEach((lq) => map.set(lq.q.trim().toLowerCase(), lq));
 
-      merged.forEach((qItem) => {
+      Array.from(map.values()).forEach((qItem) => {
         if (qItem.status !== "published") return;
         const b = qItem.block;
         const m = qItem.moduleId;
@@ -999,7 +867,12 @@ export async function searchGlobalQuestions(queryText: string): Promise<Firestor
     const localQs = getLocalQuestions().filter(lq => lq.status === "published");
     const defResults = DEFAULT_QUESTIONS.filter(dq => dq.status === "published");
     
-    const combined = mergeQuestionSources(defResults, localQs, fsResults);
+    const map = new Map<string, FirestoreQuestion>();
+    defResults.forEach(dq => map.set(dq.q.trim().toLowerCase(), dq));
+    localQs.forEach(lq => map.set(lq.q.trim().toLowerCase(), lq));
+    fsResults.forEach(fq => map.set(fq.q.trim().toLowerCase(), fq));
+    
+    const combined = Array.from(map.values());
     const lowerQuery = queryText.toLowerCase();
     
     return combined.filter(q => 

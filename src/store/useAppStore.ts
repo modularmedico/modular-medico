@@ -11,8 +11,6 @@ export interface QuizSession {
   bookmarked: Record<number, boolean>;
   /** How many times each original question index has been requeued (spaced repetition is capped at 1). */
   requeueCount: Record<number, number>;
-  /** Original question indices the learner explicitly skipped, for the "Review skipped" jump list. */
-  skipped: Record<number, boolean>;
 }
 
 interface AppState {
@@ -100,7 +98,6 @@ export const useAppStore = create<AppState>()(
             record: {},
             bookmarked: {},
             requeueCount: {},
-            skipped: {},
           },
         }),
       updateSession: (patch) => {

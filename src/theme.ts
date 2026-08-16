@@ -20,7 +20,6 @@ export interface ThemeTokens {
   goldDeep: string;
   green: string;
   red: string;
-  amber: string;
   chip: string[];
 }
 
@@ -43,7 +42,6 @@ export const THEME: { dark: ThemeTokens; light: ThemeTokens } = {
     goldDeep: "#EAB308",
     green: "#34D399",
     red: "#F87171",
-    amber: "#FBBF24",
     chip: ["#018ABE", "#02457A", "#97CADB", "#001B48", "#249DD1", "#64C0DC"],
   },
   light: {
@@ -64,7 +62,6 @@ export const THEME: { dark: ThemeTokens; light: ThemeTokens } = {
     goldDeep: "#D97706",
     green: "#16A34A",
     red: "#DC2626",
-    amber: "#D97706",
     chip: ["#02457A", "#018ABE", "#001B48", "#257A9E", "#5BA6C2", "#0F5280"],
   },
 };

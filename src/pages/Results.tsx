@@ -28,8 +28,6 @@ export default function Results() {
 
   const { setRef, answers } = lastResult;
   const correct = answers.filter((a) => a.correct).length;
-  const skipped = answers.filter((a) => !a.correct && a.selected === null).length;
-  const incorrect = answers.length - correct - skipped;
   const pct = Math.round((correct / answers.length) * 100);
   const scoreColor = pct >= 80 ? t.green : pct >= 50 ? t.gold : t.red;
   const isCustom = setRef.block === 0;
@@ -47,43 +45,26 @@ export default function Results() {
         <p style={{ color: t.textMuted, fontSize: 13, marginTop: 6 }}>
           {correct} of {answers.length} correct
         </p>
-        <div className={`mt-6 grid gap-3 ${skipped > 0 ? "grid-cols-3" : "grid-cols-2"}`}>
+        <div className="mt-6 grid grid-cols-2 gap-3">
           <div className="rounded-2xl p-3" style={{ backgroundColor: t.surfaceAlt }}>
             <div style={{ fontFamily: FONT_MONO, fontSize: 19, fontWeight: 700, color: t.green }}>{correct}</div>
             <div style={{ fontSize: 11, color: t.textFaint }}>Correct</div>
           </div>
           <div className="rounded-2xl p-3" style={{ backgroundColor: t.surfaceAlt }}>
-            <div style={{ fontFamily: FONT_MONO, fontSize: 19, fontWeight: 700, color: t.red }}>{incorrect}</div>
+            <div style={{ fontFamily: FONT_MONO, fontSize: 19, fontWeight: 700, color: t.red }}>{answers.length - correct}</div>
             <div style={{ fontSize: 11, color: t.textFaint }}>Incorrect</div>
           </div>
-          {skipped > 0 && (
-            <div className="rounded-2xl p-3" style={{ backgroundColor: t.surfaceAlt }}>
-              <div style={{ fontFamily: FONT_MONO, fontSize: 19, fontWeight: 700, color: t.textFaint }}>{skipped}</div>
-              <div style={{ fontSize: 11, color: t.textFaint }}>Skipped</div>
-            </div>
-          )}
         </div>
       </Card>
       <Card t={t}>
         <h3 style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Breakdown</h3>
         <div className="flex flex-col gap-2">
-          {setRef.questions.map((q, i) => {
-            const a = answers[i];
-            const wasSkipped = !a.correct && a.selected === null;
-            return (
-              <div key={i} className="flex items-center gap-2 text-sm" style={{ color: t.textMuted }}>
-                {a.correct ? (
-                  <CheckCircle2 size={14} color={t.green} />
-                ) : wasSkipped ? (
-                  <div className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-dashed" style={{ borderColor: t.textFaint }} />
-                ) : (
-                  <XCircle size={14} color={t.red} />
-                )}
-                <span className="truncate">{q.q}</span>
-                {wasSkipped && <span className="shrink-0 text-xs" style={{ color: t.textFaint }}>Skipped</span>}
-              </div>
-            );
-          })}
+          {setRef.questions.map((q, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm" style={{ color: t.textMuted }}>
+              {answers[i].correct ? <CheckCircle2 size={14} color={t.green} /> : <XCircle size={14} color={t.red} />}
+              <span className="truncate">{q.q}</span>
+            </div>
+          ))}
         </div>
       </Card>
       <div className="flex gap-3">

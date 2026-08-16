@@ -29,7 +29,7 @@ import {
 import {
   subscribeBlockDefinitions,
   subscribeCurriculumCounts,
-  subscribePublishedQuestions,
+  subscribeAllQuestions,
   type CurriculumCounts,
 } from "../services/adminContent";
 import type { FirestoreQuestion } from "../types";
@@ -59,7 +59,7 @@ export default function Subjects() {
   useEffect(() => {
     const unsubBlocks = subscribeBlockDefinitions(setBlockDefs);
     const unsubCounts = subscribeCurriculumCounts(setCounts);
-    const unsubQs = subscribePublishedQuestions((qs) => {
+    const unsubQs = subscribeAllQuestions((qs) => {
       setAllQuestions(qs);
       setQuestionsLoaded(true);
     });
