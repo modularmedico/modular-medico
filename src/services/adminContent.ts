@@ -505,21 +505,34 @@ function getDeletedQuestionIds(): Set<string> {
   return new Set();
 }
 
-function markQuestionDeleted(idOrText: string) {
+function markQuestionDeleted(id: string) {
   try {
     const current = getDeletedQuestionIds();
-    current.add(idOrText.toLowerCase().trim());
+    current.add(id.toLowerCase().trim());
     localStorage.setItem(LOCAL_DELETED_QS_KEY, JSON.stringify(Array.from(current)));
   } catch {
     // ignore
   }
 }
 
+/**
+ * Deletes a question by id.
+ *
+ * IMPORTANT: the local "deleted" blacklist (LOCAL_DELETED_QS_KEY) must only ever be
+ * written when the real Firestore delete FAILS. It exists purely as a stop-gap so a
+ * doc that couldn't actually be removed from Firestore (e.g. permission-denied,
+ * offline) still disappears from this browser's view. If we mark it unconditionally
+ * — including on a successful delete — the id (or worse, the question's own text)
+ * sits in localStorage forever. Firestore auto-ids are never reused, so blacklisting
+ * by id after a successful delete does nothing useful; blacklisting by TEXT actively
+ * hides any *future* question saved with the same/similar wording, which is exactly
+ * what was silently swallowing re-imported MCQs on this device (counts stayed correct
+ * because subscribeCurriculumCounts never consulted this blacklist, only the module
+ * list did). We now only blacklist on failure, and only ever by id.
+ */
 export async function deleteQuestion(id: string, qText?: string) {
-  if (id) markQuestionDeleted(id);
-  if (qText) markQuestionDeleted(qText);
-
-  // Update local storage
+  // Update local storage cache (locally-saved drafts only — these have no Firestore
+  // doc, so removing them here is safe and permanent regardless of the write below).
   const localQuestions: FirestoreQuestion[] = JSON.parse(localStorage.getItem("modular_medico_local_qs") || "[]");
   const filtered = localQuestions.filter((q) => q.id !== id && (qText ? q.q.trim().toLowerCase() !== qText.trim().toLowerCase() : true));
   localStorage.setItem("modular_medico_local_qs", JSON.stringify(filtered));
@@ -527,7 +540,8 @@ export async function deleteQuestion(id: string, qText?: string) {
   try {
     await deleteDoc(doc(db, "questions", id));
   } catch (err) {
-    console.warn("Firestore deleteQuestion failed:", err);
+    console.warn("Firestore deleteQuestion failed, hiding locally instead:", err);
+    if (id) markQuestionDeleted(id);
   }
 }
 
@@ -538,11 +552,6 @@ export async function deleteQuestion(id: string, qText?: string) {
  */
 export async function bulkDeleteQuestions(items: { id: string; q: string }[]) {
   if (items.length === 0) return;
-
-  items.forEach((item) => {
-    if (item.id) markQuestionDeleted(item.id);
-    if (item.q) markQuestionDeleted(item.q);
-  });
 
   const idSet = new Set(items.map((i) => i.id));
   const textSet = new Set(items.map((i) => i.q.trim().toLowerCase()));
@@ -557,7 +566,13 @@ export async function bulkDeleteQuestions(items: { id: string; q: string }[]) {
     });
     await batch.commit();
   } catch (err) {
-    console.warn("Firestore bulkDeleteQuestions batch failed:", err);
+    console.warn("Firestore bulkDeleteQuestions batch failed, hiding locally instead:", err);
+    // Only blacklist by id, and only because the real delete didn't go through —
+    // see the comment on deleteQuestion() for why this must never happen on success
+    // or match by question text.
+    items.forEach((item) => {
+      if (item.id) markQuestionDeleted(item.id);
+    });
   }
 }
 
@@ -565,7 +580,7 @@ function getLocalQuestions(): FirestoreQuestion[] {
   try {
     const deleted = getDeletedQuestionIds();
     const list: FirestoreQuestion[] = JSON.parse(localStorage.getItem("modular_medico_local_qs") || "[]");
-    return list.filter((q) => !deleted.has(q.id.toLowerCase().trim()) && !deleted.has(q.q.toLowerCase().trim()));
+    return list.filter((q) => !deleted.has(q.id.toLowerCase().trim()));
   } catch {
     return [];
   }
@@ -580,12 +595,12 @@ export function subscribeSubjectQuestions(subjectId: string, cb: (questions: Fir
     (snap) => {
       const fsQuestions = snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
-        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim()));
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
       const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.subjectId === subjectId && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+        (dq) => dq.subjectId === subjectId && !deleted.has(dq.id.toLowerCase().trim())
       );
       const localQs = getLocalQuestions().filter(
-        (lq) => lq.subjectId === subjectId && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+        (lq) => lq.subjectId === subjectId && !deleted.has(lq.id.toLowerCase().trim())
       );
 
       cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
@@ -593,10 +608,10 @@ export function subscribeSubjectQuestions(subjectId: string, cb: (questions: Fir
     (err) => {
       console.warn("Firestore subject questions fallback:", err.message);
       const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.subjectId === subjectId && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+        (dq) => dq.subjectId === subjectId && !deleted.has(dq.id.toLowerCase().trim())
       );
       const localQs = getLocalQuestions().filter(
-        (lq) => lq.subjectId === subjectId && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+        (lq) => lq.subjectId === subjectId && !deleted.has(lq.id.toLowerCase().trim())
       );
       cb(mergeQuestionSources(defQuestions, localQs, []));
     }
@@ -622,12 +637,12 @@ export function subscribeAllQuestions(
       const deleted = getDeletedQuestionIds();
       const fsQuestions = snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
-        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim()));
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
       const localQs = getLocalQuestions().filter(
-        (lq) => !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+        (lq) => !deleted.has(lq.id.toLowerCase().trim())
       );
       const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+        (dq) => !deleted.has(dq.id.toLowerCase().trim())
       );
 
       cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
@@ -636,10 +651,10 @@ export function subscribeAllQuestions(
       console.warn("Firestore all questions fallback:", err.message);
       const deleted = getDeletedQuestionIds();
       const localQs = getLocalQuestions().filter(
-        (lq) => !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+        (lq) => !deleted.has(lq.id.toLowerCase().trim())
       );
       const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+        (dq) => !deleted.has(dq.id.toLowerCase().trim())
       );
       cb(mergeQuestionSources(defQuestions, localQs, []));
 
@@ -904,12 +919,12 @@ export function subscribePublishedQuestions(cb: (questions: FirestoreQuestion[])
       const deleted = getDeletedQuestionIds();
       const fsQuestions = snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
-        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()) && !deleted.has(fq.q.toLowerCase().trim()));
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
       const localQs = getLocalQuestions().filter(
-        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim())
       );
       const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim())
       );
 
       cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
@@ -918,10 +933,10 @@ export function subscribePublishedQuestions(cb: (questions: FirestoreQuestion[])
       console.warn("Firestore published questions fallback:", err.message);
       const deleted = getDeletedQuestionIds();
       const localQs = getLocalQuestions().filter(
-        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim()) && !deleted.has(lq.q.toLowerCase().trim())
+        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim())
       );
       const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim()) && !deleted.has(dq.q.toLowerCase().trim())
+        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim())
       );
       cb(mergeQuestionSources(defQuestions, localQs, []));
     }
@@ -958,7 +973,12 @@ export function subscribeCurriculumCounts(cb: (counts: CurriculumCounts) => void
         if (s) subjectTotalCounts[s] = (subjectTotalCounts[s] || 0) + 1;
       };
 
-      const fsQuestions = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+      // Apply the same locally-hidden-id filter as subscribePublishedQuestions so the
+      // "X Questions" badges can never disagree with the module list built from it.
+      const deleted = getDeletedQuestionIds();
+      const fsQuestions = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
       const merged = mergeQuestionSources(DEFAULT_QUESTIONS, getLocalQuestions(), fsQuestions);
 
       merged.forEach(processQuestion);
