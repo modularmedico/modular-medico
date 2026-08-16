@@ -615,8 +615,8 @@ export default function AdminPanel() {
 
       {/* Main Tab Switcher */}
       <div
-        className="flex rounded-2xl p-1.5 self-start"
-        style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
+        className="flex flex-nowrap gap-1 overflow-x-auto rounded-2xl p-1.5 self-start max-w-full"
+        style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, scrollbarWidth: "none" }}
       >
         {ADMIN_TABS.map((tab) => {
           const active = activeTab === tab.id;
@@ -624,14 +624,14 @@ export default function AdminPanel() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition-all"
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-3.5 py-2.5 text-xs font-bold transition-all sm:gap-2 sm:px-5 sm:text-sm"
               style={{
                 backgroundColor: active ? t.purpleStrong : "transparent",
                 color: active ? "#fff" : t.textMuted,
                 boxShadow: active ? `0 2px 8px ${t.purpleStrong}55` : "none",
               }}
             >
-              <tab.icon size={16} />
+              <tab.icon size={15} className="shrink-0" />
               {tab.label}
               {tab.id === "manage_mcq" && (
                 <span
