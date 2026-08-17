@@ -11,6 +11,7 @@ import {
   SUBJECT_LIST,
   SUBJECT_META,
   DEFAULT_BLOCK_DEFINITIONS,
+  FREE_BLOCK,
   type SubjectId,
   type BlockDefinition,
 } from "../data/subjects";
@@ -84,7 +85,7 @@ export default function SubjectDetail() {
 
       const blockDef = blockDefs.find((b) => b.block === q.block);
       const count = counts.subjectInModuleCounts[`${q.block}-${modId}-${subjectId}`] || 0;
-      const locked = q.block !== 1 && !isPremium;
+      const locked = q.block !== FREE_BLOCK && !isPremium;
 
       moduleAppearances.push({
         block:
@@ -149,7 +150,7 @@ export default function SubjectDetail() {
 
       {!isPremium && (
         <div className="flex items-center gap-2 rounded-2xl px-4 py-2.5 text-xs" style={{ backgroundColor: `${t.gold}18`, color: t.goldDeep }}>
-          <Lock size={13} /> Block 1 is free in every module. Unlock all Blocks (1–15) free during Beta.
+          <Lock size={13} /> Block 3 is free in every module. Unlock all Blocks (1–15) free during Beta.
           <button onClick={() => navigate(isLoggedIn ? "/paywall" : "/signup")} className="ml-auto font-bold underline">
             Unlock Full Access
           </button>

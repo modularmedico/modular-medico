@@ -23,6 +23,7 @@ import {
   SUBJECT_META,
   DEFAULT_BLOCK_DEFINITIONS,
   TOTAL_BLOCKS,
+  FREE_BLOCK,
   type BlockDefinition,
   type SubjectId,
 } from "../data/subjects";
@@ -161,7 +162,7 @@ export default function Subjects() {
               color: activeTab === "subject" ? "#fff" : t.textMuted,
             }}
           >
-            <BookOpen size={14} /> 12 Subjects
+            <BookOpen size={14} /> {SUBJECT_LIST.length} Subjects
           </button>
         </div>
       </div>
@@ -175,7 +176,7 @@ export default function Subjects() {
                 <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>Full MBBS Access</span>
               </div>
               <p className="text-xs" style={{ color: t.textMuted }}>
-                Block 1 is open for free practice. Unlock all Blocks 1–15 with a full pass.
+                Block 3 is open for free practice. Unlock all Blocks 1–15 with a full pass.
               </p>
             </div>
             <Btn t={t} icon={Crown} onClick={() => navigate(isLoggedIn ? "/paywall" : "/signup")}>
@@ -209,7 +210,7 @@ export default function Subjects() {
             {filteredBlockDefs.map((b) => {
               const totalInBlock = counts.blockCounts[b.block] || 0;
               const isSelected = selectedBlockNum === b.block;
-              const isLocked = b.block !== 1 && !isPremium;
+              const isLocked = b.block !== FREE_BLOCK && !isPremium;
 
               return (
                 <button
@@ -315,16 +316,16 @@ export default function Subjects() {
                 <Btn
                   t={t}
                   full
-                  icon={currentBlockDef.block !== 1 && !isPremium ? Lock : Play}
+                  icon={currentBlockDef.block !== FREE_BLOCK && !isPremium ? Lock : Play}
                   onClick={() =>
                     navigate(
-                      currentBlockDef.block !== 1 && !isPremium
+                      currentBlockDef.block !== FREE_BLOCK && !isPremium
                         ? (isLoggedIn ? "/paywall" : "/signup")
                         : `/subjects/all/all/${currentBlockDef.block}?fullBlock=true`
                     )
                   }
                 >
-                  {currentBlockDef.block !== 1 && !isPremium ? "Unlock Block" : `Start Block ${currentBlockDef.block} Exam`}
+                  {currentBlockDef.block !== FREE_BLOCK && !isPremium ? "Unlock Block" : `Start Block ${currentBlockDef.block} Exam`}
                 </Btn>
                 <span className="text-center text-[11px]" style={{ color: t.textFaint }}>
                   Full multi-module exam
@@ -413,19 +414,19 @@ export default function Subjects() {
                           <button
                             onClick={() =>
                               navigate(
-                                currentBlockDef.block !== 1 && !isPremium
+                                currentBlockDef.block !== FREE_BLOCK && !isPremium
                                   ? (isLoggedIn ? "/paywall" : "/signup")
                                   : `/subjects/all/${mod.id}/${currentBlockDef.block}`
                               )
                             }
                             className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all hover:scale-[1.02]"
                             style={{
-                              backgroundColor: currentBlockDef.block !== 1 && !isPremium ? t.gold : t.purpleStrong,
+                              backgroundColor: currentBlockDef.block !== FREE_BLOCK && !isPremium ? t.gold : t.purpleStrong,
                               color: "#fff",
                             }}
                           >
-                            {currentBlockDef.block !== 1 && !isPremium ? <Lock size={13} fill="#fff" /> : <Play size={13} fill="#fff" />}
-                            {currentBlockDef.block !== 1 && !isPremium ? "Unlock Module" : `Practice Module`}
+                            {currentBlockDef.block !== FREE_BLOCK && !isPremium ? <Lock size={13} fill="#fff" /> : <Play size={13} fill="#fff" />}
+                            {currentBlockDef.block !== FREE_BLOCK && !isPremium ? "Unlock Module" : `Practice Module`}
                           </button>
                         </div>
                       </div>
@@ -445,7 +446,7 @@ export default function Subjects() {
                                 key={subjId}
                                 onClick={() =>
                                   navigate(
-                                    currentBlockDef.block !== 1 && !isPremium
+                                    currentBlockDef.block !== FREE_BLOCK && !isPremium
                                       ? (isLoggedIn ? "/paywall" : "/signup")
                                       : `/subjects/${subjId}/${mod.id}/${currentBlockDef.block}`
                                   )
@@ -460,7 +461,7 @@ export default function Subjects() {
                                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl relative"
                                   style={{ backgroundColor: `${color}22` }}
                                 >
-                                  {currentBlockDef.block !== 1 && !isPremium && (
+                                  {currentBlockDef.block !== FREE_BLOCK && !isPremium && (
                                     <div
                                       className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full shadow-sm"
                                       style={{ backgroundColor: t.gold, color: "#241A08" }}

@@ -235,7 +235,7 @@ export default function Home() {
             </div>
             <ul className="flex flex-col gap-3.5 text-sm" style={{ color: t.textMuted }}>
               <li className="flex items-center gap-3">
-                <Check size={16} color={t.green} /> Open access to Block 1 sets
+                <Check size={16} color={t.green} /> Open access to Block 3 sets
               </li>
               <li className="flex items-center gap-3">
                 <Check size={16} color={t.green} /> Instant answer rationales &amp; explanations

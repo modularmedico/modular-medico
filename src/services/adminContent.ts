@@ -841,9 +841,18 @@ export async function fetchPublishedBlock(
   // Prefer matching by name when we have one — it's immune to id drift between
   // Firestore and locally-cached topic docs (see subscribeTopics),
   // which was previously causing some topics' questions to never match.
+  // Also falls back to the legacy `subheadingName`/`subheadingId` fields so
+  // older questions saved before MCQ topics had their own collection (back
+  // when this tier was called "Subheading") still match correctly.
   const applyTopicFilter = (list: FirestoreQuestion[]) => {
-    if (topicName) return list.filter((item) => (item.topicName || "").trim() === topicName.trim());
-    if (topicId) return list.filter((item) => item.topicId === topicId);
+    if (topicName) {
+      return list.filter(
+        (item) =>
+          (item.topicName || "").trim() === topicName.trim() ||
+          (item.subheadingName || "").trim() === topicName.trim()
+      );
+    }
+    if (topicId) return list.filter((item) => item.topicId === topicId || item.subheadingId === topicId);
     return list;
   };
 
@@ -920,7 +929,8 @@ export async function fetchPublishedModuleExam(
   const applyTopicFilter = (list: FirestoreQuestion[]) => {
     if (!topicName) return list;
     return list.filter((item) => {
-      const nameMatches = (item.topicName || "General / No topic") === topicName;
+      const name = item.topicName || item.subheadingName || "General / No topic";
+      const nameMatches = name === topicName;
       if (!nameMatches) return false;
       // subjectId is optional for backwards compatibility, but should always be passed
       // by callers going forward — see PracticeSetup.tsx.

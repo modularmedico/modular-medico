@@ -23,6 +23,15 @@ export interface FirestoreQuestion {
   block: number; // 1..15
   topicId?: string | null;
   topicName?: string | null;
+  /**
+   * Legacy tag fields from before MCQ topics had their own collection —
+   * some already-published questions in Firestore may still only have
+   * these set (back when this 4th tier was called "Subheading" for MCQs
+   * too, sharing lectures' `subheadings` collection). Kept here so those
+   * older questions still match when a student filters by Subheading.
+   */
+  subheadingId?: string | null;
+  subheadingName?: string | null;
   difficulty: Difficulty;
   q: string;
   options: string[];

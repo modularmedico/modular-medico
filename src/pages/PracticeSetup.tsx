@@ -20,7 +20,7 @@ import Segmented from "../components/Segmented";
 import Toggle from "../components/Toggle";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
-import { SUBJECT_META, isSubjectId, DEFAULT_BLOCK_DEFINITIONS, type BlockDefinition } from "../data/subjects";
+import { SUBJECT_META, isSubjectId, DEFAULT_BLOCK_DEFINITIONS, FREE_BLOCK, type BlockDefinition } from "../data/subjects";
 import {
   subscribeBlockDefinitions,
   subscribeTopics,
@@ -31,7 +31,7 @@ import {
 import type { Difficulty, PracticeConfig, TopicDoc } from "../types";
 
 // Mirrors the label used in the admin question bank for MCQs with no topic tag.
-const GENERAL_TOPIC_LABEL = "General / No topic";
+const GENERAL_TOPIC_LABEL = "General / No subheading";
 
 const TIMER_PRESETS = [
   { label: "3 min", seconds: 180 },
@@ -131,7 +131,10 @@ export default function PracticeSetup() {
       if (cancelled) return;
       const names = new Set<string>();
       qs.forEach((q) => {
-        if (q.topicName) names.add(q.topicName.trim());
+        // Also pick up legacy questions tagged only with `subheadingName`
+        // from before MCQ topics had their own collection.
+        const name = (q.topicName || q.subheadingName || "").trim();
+        if (name) names.add(name);
       });
       setTopicNamesFromQuestions(Array.from(names));
       setTopicsLoaded(true);
@@ -185,7 +188,7 @@ export default function PracticeSetup() {
       const seen = new Set<string>();
       const options: { subjectId: string; name: string }[] = [];
       qs.forEach((q) => {
-        const name = q.topicName || GENERAL_TOPIC_LABEL;
+        const name = q.topicName || q.subheadingName || GENERAL_TOPIC_LABEL;
         const key = `${q.subjectId}::${name.toLowerCase()}`;
         if (seen.has(key)) return;
         seen.add(key);
@@ -211,7 +214,7 @@ export default function PracticeSetup() {
     ? `${targetModule?.name || moduleId}`
     : `${SUBJECT_META[subjectId as keyof typeof SUBJECT_META]?.label || subjectId} \u00b7 ${targetModule?.name || `Block ${block}`}`;
 
-  const locked = block !== 1 && !isPremium;
+  const locked = block !== FREE_BLOCK && !isPremium;
 
   const selectedTopic = selectedTopicName
     ? topics.find((s) => s.name === selectedTopicName) || null
@@ -274,7 +277,7 @@ export default function PracticeSetup() {
         </div>
         <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 22 }}>Unlock Block {block}</h1>
         <p style={{ color: t.textMuted, fontSize: 14, lineHeight: 1.5 }}>
-          Block 1 is open for free trial practice. Unlock full access to Blocks 1–15 and custom exams.
+          Block 3 is open for free trial practice. Unlock full access to Blocks 1–15 and custom exams.
         </p>
         <Btn t={t} onClick={() => navigate(isLoggedIn ? "/paywall" : "/signup")}>
           {isLoggedIn ? "Unlock Full Access" : "Create Free Account"}
@@ -477,20 +480,20 @@ export default function PracticeSetup() {
           )}
         </div>
 
-        {/* Topic — 4th tier of the hierarchy, only shown when this Subject/Module has any */}
+        {/* Subheading — 4th tier of the hierarchy, only shown when this Subject/Module has any */}
         {isSubjectInModule && (topics.length > 0 || !topicsLoaded) && (
           <div>
             <span className="mb-2 block text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
-              Topic
+              Subheading
             </span>
             {!topicsLoaded ? (
               <span className="flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
-                <Loader2 size={13} className="animate-spin" /> Checking topics&hellip;
+                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
               </span>
             ) : (
               <div className="flex flex-wrap gap-2">
                 <Pill t={t} tone="muted" active={selectedTopicName === ""} onClick={() => setSelectedTopicName("")}>
-                  All Topics
+                  All Subheadings
                 </Pill>
                 {topics.map((s) => (
                   <Pill
@@ -508,18 +511,18 @@ export default function PracticeSetup() {
           </div>
         )}
 
-        {/* Topic — Module-wide picker, shown when practicing a whole Module ("Practice
-            Module") that has published MCQs tagged with topics across its subjects.
-            Each option is a (subject, topic) pair — labelled with its subject — so two
-            different subjects' identically-named topics are never conflated. */}
+        {/* Subheading — Module-wide picker, shown when practicing a whole Module ("Practice
+            Module") that has published MCQs tagged with subheadings across its subjects.
+            Each option is a (subject, subheading) pair — labelled with its subject — so two
+            different subjects' identically-named subheadings are never conflated. */}
         {isModuleExam && (moduleTopicOptions.length > 0 || !moduleTopicsLoaded) && (
           <div>
             <span className="mb-2 block text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
-              Topic
+              Subheading
             </span>
             {!moduleTopicsLoaded ? (
               <p className="flex items-center gap-1.5 text-xs" style={{ color: t.textMuted }}>
-                <Loader2 size={13} className="animate-spin" /> Checking topics&hellip;
+                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -529,7 +532,7 @@ export default function PracticeSetup() {
                   active={selectedModuleTopic === null}
                   onClick={() => setSelectedModuleTopic(null)}
                 >
-                  All Topics
+                  All Subheadings
                 </Pill>
                 {moduleTopicOptions.map((opt) => {
                   const subjLabel = SUBJECT_META[opt.subjectId as keyof typeof SUBJECT_META]?.label || opt.subjectId;

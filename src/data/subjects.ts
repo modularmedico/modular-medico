@@ -13,11 +13,15 @@ export const SUBJECT_LIST = [
   "forensics",
   "medicine",
   "surgery",
+  "minors",
 ] as const;
 
 export type SubjectId = typeof SUBJECT_LIST[number];
 
 export const TOTAL_BLOCKS = 15;
+
+/** The one Block that stays free for everyone; every other Block requires a paid pass. */
+export const FREE_BLOCK = 3;
 
 export const SUBJECT_META: Record<SubjectId, { label: string; tag: string; short: string; defaultYear: string }> = {
   gross_anatomy: { label: "Gross Anatomy", tag: "Structures, Organs & Bones", short: "GA", defaultYear: "1st Year" },
@@ -32,6 +36,7 @@ export const SUBJECT_META: Record<SubjectId, { label: string; tag: string; short
   forensics: { label: "Forensic Medicine", tag: "Forensics, Autopsy & Toxicology", short: "FM", defaultYear: "3rd Year" },
   medicine: { label: "Medicine", tag: "Internal Medicine & Specialties", short: "ME", defaultYear: "Final Year" },
   surgery: { label: "Surgery", tag: "General & Operative Surgery", short: "SU", defaultYear: "Final Year" },
+  minors: { label: "Minors", tag: "ENT, Ophthalmology, Dermatology & Anaesthesia", short: "MN", defaultYear: "Final Year" },
 };
 
 export const isSubjectId = (id: string): id is SubjectId => (SUBJECT_LIST as readonly string[]).includes(id);
@@ -156,7 +161,7 @@ export const DEFAULT_BLOCK_DEFINITIONS: BlockDefinition[] = [
     modules: [
       { id: "mod-24", name: "Community Medicine & Family Health-II", block: 10, subjects: ["community_medicine"] },
       { id: "mod-25", name: "GIT & Nutrition-II", block: 10, subjects: ["pathology", "pharmacology", "surgery", "medicine"] },
-      { id: "mod-26", name: "Eye & ENT-I", block: 10, subjects: ["surgery", "medicine", "pharmacology"] },
+      { id: "mod-26", name: "Eye & ENT-I", block: 10, subjects: ["surgery", "medicine", "pharmacology", "minors"] },
     ],
   },
   {
@@ -168,7 +173,7 @@ export const DEFAULT_BLOCK_DEFINITIONS: BlockDefinition[] = [
       { id: "mod-27", name: "Neurosciences-II", block: 11, subjects: ["pathology", "pharmacology", "medicine", "surgery"] },
       { id: "mod-28", name: "Psychiatry & Behavioral Sciences", block: 11, subjects: ["behavioural_science", "medicine"] },
       { id: "mod-29", name: "Renal-II", block: 11, subjects: ["pathology", "pharmacology", "medicine"] },
-      { id: "mod-30", name: "Eye & ENT-II", block: 11, subjects: ["surgery", "medicine", "pharmacology"] },
+      { id: "mod-30", name: "Eye & ENT-II", block: 11, subjects: ["surgery", "medicine", "pharmacology", "minors"] },
     ],
   },
   {
@@ -178,8 +183,8 @@ export const DEFAULT_BLOCK_DEFINITIONS: BlockDefinition[] = [
     description: "Endocrinology-II, Dermatology, Eye & ENT-III.",
     modules: [
       { id: "mod-31", name: "Endocrinology & Reproduction-II", block: 12, subjects: ["medicine", "pathology", "pharmacology", "surgery"] },
-      { id: "mod-32", name: "Dermatology", block: 12, subjects: ["medicine", "pharmacology"] },
-      { id: "mod-33", name: "Eye & ENT-III", block: 12, subjects: ["surgery", "medicine", "pharmacology"] },
+      { id: "mod-32", name: "Dermatology", block: 12, subjects: ["medicine", "pharmacology", "minors"] },
+      { id: "mod-33", name: "Eye & ENT-III", block: 12, subjects: ["surgery", "medicine", "pharmacology", "minors"] },
     ],
   },
   {
@@ -272,6 +277,7 @@ export const DEFAULT_SUBJECT_MODULE_IDS: Record<SubjectId, string[]> = {
   forensics: ["mod-15", "mod-19", "mod-23"],
   medicine: ["mod-20", "mod-21", "mod-25", "mod-26", "mod-27", "mod-28", "mod-29", "mod-30", "mod-31", "mod-32", "mod-33", "mod-35", "mod-36", "mod-37"],
   surgery: ["mod-18", "mod-25", "mod-26", "mod-27", "mod-30", "mod-31", "mod-33", "mod-34", "mod-35"],
+  minors: ["mod-26", "mod-30", "mod-32", "mod-33"],
 };
 
 

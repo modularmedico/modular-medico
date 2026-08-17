@@ -657,14 +657,14 @@ export default function AdminPanel() {
       if (filterSubject !== "all" && q.subjectId !== filterSubject) return false;
       if (filterDifficulty !== "all" && q.difficulty !== filterDifficulty) return false;
       if (filterStatus !== "all" && q.status !== filterStatus) return false;
-      if (filterTopic !== "all" && (q.topicName || "General / No topic") !== filterTopic) return false;
+      if (filterTopic !== "all" && (q.topicName || q.subheadingName || "General / No topic") !== filterTopic) return false;
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
         const inQ = q.q.toLowerCase().includes(query);
         const inOpts = q.options.some((o) => o.toLowerCase().includes(query));
         const inExp = q.explanation?.toLowerCase().includes(query);
         const inMod = q.moduleName?.toLowerCase().includes(query);
-        const inSub = q.topicName?.toLowerCase().includes(query);
+        const inSub = (q.topicName || q.subheadingName)?.toLowerCase().includes(query);
         if (!inQ && !inOpts && !inExp && !inMod && !inSub) return false;
       }
       return true;
@@ -684,7 +684,7 @@ export default function AdminPanel() {
     allQuestions.forEach((q) => {
       if (filterBlock !== "all" && q.block !== Number(filterBlock)) return;
       if (filterSubject !== "all" && q.subjectId !== filterSubject) return;
-      names.add(q.topicName || "General / No topic");
+      names.add(q.topicName || q.subheadingName || "General / No topic");
     });
     return Array.from(names).sort();
   }, [allQuestions, filterBlock, filterSubject]);
@@ -961,7 +961,7 @@ export default function AdminPanel() {
             <div className="mt-4 border-t pt-4" style={{ borderColor: t.border }}>
               <div className="mb-1.5">
                 <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  <ListTree size={13} /> Topic
+                  <ListTree size={13} /> Subheading
                 </label>
               </div>
 
@@ -974,7 +974,7 @@ export default function AdminPanel() {
                     setNewTopicName(e.target.value);
                   }}
                   onKeyDown={(e) => e.key === "Enter" && handleCreateTopic()}
-                  placeholder="Type a topic, e.g. Coronary Circulation"
+                  placeholder="Type a subheading, e.g. Coronary Circulation"
                   className="flex-1 min-w-[200px] rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
                   style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
                 />
@@ -999,7 +999,7 @@ export default function AdminPanel() {
               {/* Previously used topics in this scope, for quick reuse or removal */}
               {topicsLoading ? (
                 <div className="mt-3 flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
-                  <Loader2 size={13} className="animate-spin" /> Loading topics&hellip;
+                  <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
                 </div>
               ) : (
                 topics.length > 0 && (
@@ -1452,17 +1452,17 @@ export default function AdminPanel() {
                   </select>
                 </div>
 
-                {/* Topic Filter */}
+                {/* Subheading Filter */}
                 <div>
                   <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                    Topic
+                    Subheading
                   </label>
                   {loadingQuestions ? (
                     <div
                       className="flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold"
                       style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.textFaint }}
                     >
-                      <Loader2 size={13} className="animate-spin" /> Loading topics&hellip;
+                      <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
                     </div>
                   ) : (
                     <select
@@ -1471,7 +1471,7 @@ export default function AdminPanel() {
                       className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
                       style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
                     >
-                      <option value="all">All Topics</option>
+                      <option value="all">All Subheadings</option>
                       {availableTopicNames.map((name) => (
                         <option key={name} value={name}>{name}</option>
                       ))}
@@ -1506,8 +1506,8 @@ export default function AdminPanel() {
                 </button>
               )}
 
-              {/* Bulk delete — only surfaced once a Topic is selected, so it's scoped to
-                  "delete this topic's MCQs" rather than an easy way to wipe everything. */}
+              {/* Bulk delete — only surfaced once a Subheading is selected, so it's scoped to
+                  "delete this subheading's MCQs" rather than an easy way to wipe everything. */}
               {filterTopic !== "all" && filteredQuestions.length > 0 && (
                 !bulkDeleteConfirm ? (
                   <button

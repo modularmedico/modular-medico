@@ -174,7 +174,7 @@ export default function Profile() {
           <Card t={t} style={{ borderColor: t.gold }} className="flex items-center justify-between gap-3">
             <div>
               <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14 }}>You're on the free plan</span>
-              <p className="text-xs" style={{ color: t.textFaint }}>Block 1 only, in every module</p>
+              <p className="text-xs" style={{ color: t.textFaint }}>Block 3 only, in every module</p>
             </div>
             <Btn t={t} icon={Crown} onClick={() => navigate("/paywall")}>
               Upgrade
