@@ -48,6 +48,7 @@ import {
   subscribeSubheadings,
   createSubheading,
   deleteSubheading,
+  QuestionSaveError,
 } from "../services/adminContent";
 import {
   addLecture,
@@ -110,9 +111,9 @@ export default function AdminPanel() {
   /* ADD MCQ STATE                                                             */
   /* ------------------------------------------------------------------------- */
   const [inputMode, setInputMode] = useState<"bracket" | "traditional">("bracket");
-  // "success" = confirmed saved to Firestore. "success-local" = only cached in this
-  // browser (Firestore write was rejected) — still shown as a distinct warning, not
-  // a false "success", so the admin knows it won't show up anywhere else.
+  // "success" = confirmed saved to Firestore. "error" = the write was rejected and
+  // NOTHING was saved anywhere (no more silent localStorage fallback) — saveWarning
+  // holds the specific, actionable reason so the admin knows exactly what to fix.
   const [saveWarning, setSaveWarning] = useState<string | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<number>(1);
   const [isCustomBlock, setIsCustomBlock] = useState(false);
@@ -137,7 +138,7 @@ export default function AdminPanel() {
 
   // Bracket Mode State
   const [bracketText, setBracketText] = useState("");
-  const [saveStatus, setSaveStatus] = useState<"success" | "success-local" | "error" | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"success" | "error" | null>(null);
   const [savedCount, setSavedCount] = useState(0);
 
   // Traditional Mode State
@@ -397,6 +398,12 @@ export default function AdminPanel() {
   // Handle Save Bracket MCQs
   const handleSaveBracket = async () => {
     if (validParsedMCQs.length === 0) return;
+    if (!email) {
+      setSaveStatus("error");
+      setSaveWarning("You aren't logged in, so this can't be saved. Log in with an admin-enabled account first.");
+      setTimeout(() => setSaveStatus(null), 12000);
+      return;
+    }
     try {
       const subheading = await resolveSubheadingForSave();
       const itemsToSave = validParsedMCQs.map((v) => ({
@@ -414,21 +421,16 @@ export default function AdminPanel() {
         status: (publishImmediately ? "published" : "draft") as QuestionStatus,
       }));
 
-      const result = await bulkAddQuestions(itemsToSave);
+      await bulkAddQuestions(itemsToSave);
       setSavedCount(itemsToSave.length);
-      if (result.source === "firestore") {
-        setSaveStatus("success");
-        setSaveWarning(null);
-      } else {
-        setSaveStatus("success-local");
-        setSaveWarning(result.message);
-      }
-      setBracketText("");
-      setTimeout(() => setSaveStatus(null), result.source === "firestore" ? 4000 : 9000);
-    } catch {
-      setSaveStatus("error");
+      setSaveStatus("success");
       setSaveWarning(null);
+      setBracketText("");
       setTimeout(() => setSaveStatus(null), 4000);
+    } catch (err) {
+      setSaveStatus("error");
+      setSaveWarning(err instanceof QuestionSaveError ? err.message : "Failed to save MCQs. Please check the format and try again.");
+      setTimeout(() => setSaveStatus(null), 12000);
     }
   };
 
@@ -442,9 +444,15 @@ export default function AdminPanel() {
 
   const handleSaveTraditional = async (addAnother = false) => {
     if (!isTraditionalValid) return;
+    if (!email) {
+      setSaveStatus("error");
+      setSaveWarning("You aren't logged in, so this can't be saved. Log in with an admin-enabled account first.");
+      setTimeout(() => setSaveStatus(null), 12000);
+      return;
+    }
     try {
       const subheading = await resolveSubheadingForSave();
-      const result = await addQuestion({
+      await addQuestion({
         subjectId,
         moduleId: effectiveModuleId,
         moduleName: effectiveModuleName,
@@ -460,31 +468,20 @@ export default function AdminPanel() {
       });
 
       setSavedCount(1);
-      if (result.source === "firestore") {
-        setSaveStatus("success");
-        setSaveWarning(null);
-        setTimeout(() => setSaveStatus(null), 3000);
-      } else {
-        setSaveStatus("success-local");
-        setSaveWarning(result.message);
-        setTimeout(() => setSaveStatus(null), 9000);
-      }
-
-      if (addAnother) {
-        setTraditionalQ("");
-        setOptions(["", "", "", ""]);
-        setExplanation("");
-        setCorrectOptionIdx(0);
-      } else {
-        setTraditionalQ("");
-        setOptions(["", "", "", ""]);
-        setExplanation("");
-        setCorrectOptionIdx(0);
-      }
-    } catch {
-      setSaveStatus("error");
+      setSaveStatus("success");
       setSaveWarning(null);
       setTimeout(() => setSaveStatus(null), 3000);
+
+      setTraditionalQ("");
+      setOptions(["", "", "", ""]);
+      setExplanation("");
+      setCorrectOptionIdx(0);
+    } catch (err) {
+      setSaveStatus("error");
+      setSaveWarning(err instanceof QuestionSaveError ? err.message : "Failed to save this MCQ. Please try again.");
+      setTimeout(() => setSaveStatus(null), 12000);
+      // Deliberately do NOT clear the form on error — the admin's typed question,
+      // options, and explanation must stay so nothing is lost on a failed save.
     }
   };
 
@@ -672,6 +669,20 @@ export default function AdminPanel() {
       {/* ===================================================================== */}
       {activeTab === "add_mcq" && (
         <div className="flex flex-col gap-6">
+          {!email && (
+            <div
+              className="flex items-start gap-2 rounded-2xl px-4 py-3 text-sm font-bold shadow-sm"
+              style={{ backgroundColor: `${t.red}20`, border: `1.5px solid ${t.red}`, color: t.red }}
+            >
+              <XCircle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>
+                You aren't logged in. The admin panel password only unlocks this screen — Firestore also requires
+                you to be signed in with an account that has been granted real admin rights. Log in first, then make
+                sure that account has run through scripts/setAdminClaim.mjs, or saves below will fail.
+              </span>
+            </div>
+          )}
+
           {/* Target Classification Card (Block, Module, Subject, Difficulty) */}
           <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
             <div className="flex items-center justify-between border-b pb-3 mb-4" style={{ borderColor: t.border }}>
@@ -944,26 +955,13 @@ export default function AdminPanel() {
             </div>
           )}
 
-          {saveStatus === "success-local" && (
-            <div
-              className="flex items-start gap-2 rounded-2xl px-4 py-3 text-sm font-bold shadow-sm"
-              style={{ backgroundColor: `${t.amber}20`, border: `1.5px solid ${t.amber}`, color: t.amber }}
-            >
-              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
-              <span>
-                Saved {savedCount} MCQ{savedCount !== 1 ? "s" : ""} to this browser only — not to Firestore.
-                {saveWarning ? ` ${saveWarning}` : ""}
-              </span>
-            </div>
-          )}
-
           {saveStatus === "error" && (
             <div
-              className="flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold shadow-sm"
+              className="flex items-start gap-2 rounded-2xl px-4 py-3 text-sm font-bold shadow-sm"
               style={{ backgroundColor: `${t.red}20`, border: `1.5px solid ${t.red}`, color: t.red }}
             >
-              <XCircle size={18} />
-              <span>Failed to save MCQs. Please check the format and try again.</span>
+              <XCircle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{saveWarning || "Failed to save. Please check the format and try again."}</span>
             </div>
           )}
 

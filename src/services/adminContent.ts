@@ -395,25 +395,64 @@ export interface QuestionInput {
 }
 
 /**
- * Result of a save attempt. `source` tells the caller (and the UI) whether the
- * MCQ(s) actually made it to Firestore — where they're visible in Manage MCQs &
- * Bank, to other admins, and to students — or only got cached in this browser's
- * localStorage because the Firestore write was rejected.
+ * Result of a successful save — MCQ(s) are confirmed written to Firestore,
+ * where they're visible in Manage MCQs & Bank, to other admins, and to
+ * students.
  *
- * `reason: "permission-denied"` specifically means the signed-in account does not
- * carry the real `admin` custom claim that Firestore rules require (see
- * scripts/setAdminClaim.mjs) — the in-app "Enter Admin" screen only gates the UI,
- * it can't grant that claim. Any other reason is most likely a connectivity issue.
+ * Saves are no longer silently cached in localStorage when the Firestore
+ * write fails. A failed write throws a `QuestionSaveError` instead (see
+ * below) so the failure is impossible to miss — previously a rejected write
+ * would fall back to localStorage and report "success", which meant MCQs
+ * that never reached the database still appeared to save fine in the admin's
+ * own browser.
  */
-export type SaveResult =
-  | { source: "firestore" }
-  | { source: "local"; reason: "permission-denied" | "offline" | "unknown"; message: string };
+export type SaveResult = { source: "firestore" };
 
-function classifyWriteError(err: unknown): "permission-denied" | "offline" | "unknown" {
+export type SaveErrorReason = "permission-denied" | "offline" | "unknown";
+
+/**
+ * Thrown when a question fails to save to Firestore. Carries a `reason` and a
+ * ready-to-display `message` so the UI can show the admin exactly what went
+ * wrong and how to fix it, instead of silently caching the MCQ locally.
+ *
+ * `reason: "permission-denied"` specifically means the signed-in account does
+ * not carry the real `admin` custom claim that Firestore rules require (see
+ * scripts/setAdminClaim.mjs) — the in-app "Enter Admin" screen only gates the
+ * UI, it can't grant that claim. This is by far the most common cause: the
+ * admin password gets someone into the panel, but their Firebase account was
+ * never actually granted admin rights server-side, so every write is rejected.
+ */
+export class QuestionSaveError extends Error {
+  reason: SaveErrorReason;
+  constructor(reason: SaveErrorReason, message: string) {
+    super(message);
+    this.name = "QuestionSaveError";
+    this.reason = reason;
+  }
+}
+
+function classifyWriteError(err: unknown): SaveErrorReason {
   const code = (err as { code?: string } | null)?.code;
   if (code === "permission-denied") return "permission-denied";
   if (code === "unavailable" || (typeof navigator !== "undefined" && !navigator.onLine)) return "offline";
   return "unknown";
+}
+
+function messageForReason(reason: SaveErrorReason, plural: boolean): string {
+  const these = plural ? "These" : "This";
+  const werent = plural ? "weren't" : "wasn't";
+  if (reason === "permission-denied") {
+    return (
+      `${these} MCQ${plural ? "s" : ""} ${werent} saved. Your signed-in account isn't a real Firestore admin ` +
+      `— the admin panel password only unlocks this screen, it doesn't grant database write access. ` +
+      `Ask whoever manages the project to run "node scripts/setAdminClaim.mjs your@email.com", then log out ` +
+      `and back in on that account.`
+    );
+  }
+  if (reason === "offline") {
+    return `${these} MCQ${plural ? "s" : ""} ${werent} saved — you appear to be offline. Reconnect and try again.`;
+  }
+  return `${these} MCQ${plural ? "s" : ""} ${werent} saved — Firestore rejected the write for an unknown reason. Please try again.`;
 }
 
 export async function addQuestion(input: QuestionInput): Promise<SaveResult> {
@@ -426,21 +465,9 @@ export async function addQuestion(input: QuestionInput): Promise<SaveResult> {
     await addDoc(collection(db, "questions"), cleanInput);
     return { source: "firestore" };
   } catch (err) {
-    console.warn("Firestore addQuestion failed, appending to local store:", err);
-    const localQuestions: FirestoreQuestion[] = JSON.parse(localStorage.getItem("modular_medico_local_qs") || "[]");
-    localQuestions.push({ id: `local-${Date.now()}-${Math.random()}`, ...cleanInput });
-    localStorage.setItem("modular_medico_local_qs", JSON.stringify(localQuestions));
+    console.error("Firestore addQuestion failed:", err);
     const reason = classifyWriteError(err);
-    return {
-      source: "local",
-      reason,
-      message:
-        reason === "permission-denied"
-          ? "Your account isn't a real Firestore admin yet, so this only saved to this browser — it won't show in Manage MCQs & Bank on other devices or for students. Run scripts/setAdminClaim.mjs to fix this."
-          : reason === "offline"
-          ? "You appear to be offline — this was cached locally and needs a real save once you're back online."
-          : "Firestore rejected this write for an unknown reason — this only saved to this browser.",
-    };
+    throw new QuestionSaveError(reason, messageForReason(reason, false));
   }
 }
 
@@ -454,28 +481,9 @@ export async function bulkAddQuestions(inputs: QuestionInput[]): Promise<SaveRes
     await batch.commit();
     return { source: "firestore" };
   } catch (err) {
-    console.warn("Firestore bulkAddQuestions failed, storing locally:", err);
-    const localQuestions: FirestoreQuestion[] = JSON.parse(localStorage.getItem("modular_medico_local_qs") || "[]");
-    inputs.forEach((inp) => {
-      localQuestions.push({
-        id: `local-${Date.now()}-${Math.random()}`,
-        ...inp,
-        status: inp.status ?? "draft",
-        createdAt: Date.now(),
-      });
-    });
-    localStorage.setItem("modular_medico_local_qs", JSON.stringify(localQuestions));
+    console.error("Firestore bulkAddQuestions failed:", err);
     const reason = classifyWriteError(err);
-    return {
-      source: "local",
-      reason,
-      message:
-        reason === "permission-denied"
-          ? "Your account isn't a real Firestore admin yet, so these only saved to this browser — they won't show in Manage MCQs & Bank on other devices or for students. Run scripts/setAdminClaim.mjs to fix this."
-          : reason === "offline"
-          ? "You appear to be offline — these were cached locally and need a real save once you're back online."
-          : "Firestore rejected this write for an unknown reason — these only saved to this browser.",
-    };
+    throw new QuestionSaveError(reason, messageForReason(reason, true));
   }
 }
 

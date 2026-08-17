@@ -356,16 +356,6 @@ export default function Shell() {
                     </NavLink>
                   ))}
 
-                  <div className="my-3 h-px" style={{ backgroundColor: t.border }} />
-
-                  <NavLink
-                    to="/admin"
-                    onClick={() => setMenuOpen(false)}
-                    className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold"
-                    style={{ color: t.teal }}
-                  >
-                    <Shield size={18} /> Faculty Admin Panel
-                  </NavLink>
                 </nav>
               </div>
 
