@@ -15,6 +15,7 @@ import Builder from "./pages/Builder";
 import Bookmarks from "./pages/Bookmarks";
 import Profile from "./pages/Profile";
 import Lectures from "./pages/Lectures";
+import OspeBooks from "./pages/OspeBooks";
 import Shop from "./pages/Shop";
 import AdminGate from "./pages/AdminGate";
 import AdminPanel from "./pages/AdminPanel";
@@ -83,6 +84,7 @@ export default function App() {
           <Route path="/bookmarks" element={<Bookmarks />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/lectures" element={<Lectures />} />
+          <Route path="/ospe-books" element={<OspeBooks />} />
           <Route path="/shop" element={<Shop />} />
           <Route path="/paywall" element={<Paywall />} />
         </Route>

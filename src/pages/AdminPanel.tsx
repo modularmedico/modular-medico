@@ -24,6 +24,8 @@ import {
   Video,
   Youtube,
   ExternalLink,
+  BookMarked,
+  Library,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
@@ -45,6 +47,9 @@ import {
   deleteQuestion,
   bulkDeleteQuestions,
   subscribeAllQuestions,
+  subscribeTopics,
+  createTopic,
+  deleteTopic,
   subscribeSubheadings,
   createSubheading,
   deleteSubheading,
@@ -57,14 +62,22 @@ import {
   subscribeAllLectures,
   toYouTubeEmbedUrl,
 } from "../services/lectures";
+import {
+  addOspeBook,
+  updateOspeBookStatus,
+  deleteOspeBook,
+  subscribeAllOspeBooks,
+} from "../services/ospeBooks";
 import { parseBracketFormat } from "../utils/parseBracketFormat";
-import type { Difficulty, FirestoreLecture, FirestoreQuestion, QuestionStatus, SubheadingDoc } from "../types";
+import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc } from "../types";
 
 const ADMIN_TABS = [
   { id: "add_mcq", label: "Add MCQs", icon: PlusCircle },
   { id: "manage_mcq", label: "Manage MCQs & Bank", icon: Search },
   { id: "add_lecture", label: "Add Lecture", icon: Video },
   { id: "manage_lecture", label: "Manage Lectures", icon: Youtube },
+  { id: "add_ospe_book", label: "Add OSPE Book", icon: BookMarked },
+  { id: "manage_ospe_book", label: "Manage OSPE Books", icon: Library },
 ] as const;
 
 type AdminTab = typeof ADMIN_TABS[number]["id"];
@@ -128,13 +141,14 @@ export default function AdminPanel() {
   const [publishImmediately, setPublishImmediately] = useState(true);
 
   /* ------------------------------------------------------------------------- */
-  /* HIERARCHY: Block -> Module -> Subject -> Subheading                       */
+  /* HIERARCHY: Block -> Module -> Subject -> Topic (MCQ-side; kept in its own */
+  /* "topics" collection, deliberately separate from Lectures' Subheadings)    */
   /* ------------------------------------------------------------------------- */
-  const [subheadings, setSubheadings] = useState<SubheadingDoc[]>([]);
-  const [subheadingsLoading, setSubheadingsLoading] = useState(true);
-  const [selectedSubheadingId, setSelectedSubheadingId] = useState<string>("");
-  const [newSubheadingName, setNewSubheadingName] = useState("");
-  const [creatingSubheading, setCreatingSubheading] = useState(false);
+  const [topics, setTopics] = useState<TopicDoc[]>([]);
+  const [topicsLoading, setTopicsLoading] = useState(true);
+  const [selectedTopicId, setSelectedTopicId] = useState<string>("");
+  const [newTopicName, setNewTopicName] = useState("");
+  const [creatingTopic, setCreatingTopic] = useState(false);
 
   // Bracket Mode State
   const [bracketText, setBracketText] = useState("");
@@ -155,7 +169,7 @@ export default function AdminPanel() {
   const [filterSubject, setFilterSubject] = useState<string>("all");
   const [filterDifficulty, setFilterDifficulty] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [filterSubheading, setFilterSubheading] = useState<string>("all");
+  const [filterTopic, setFilterTopic] = useState<string>("all");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -328,56 +342,157 @@ export default function AdminPanel() {
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }, [lectures, lectureFilterBlock, lectureFilterSubject, lectureFilterStatus, lectureSearchQuery]);
 
+  /* ------------------------------------------------------------------------- */
+  /* OSPE BOOKS STATE (Subject-scoped only — a Google Drive PDF link per book) */
+  /* ------------------------------------------------------------------------- */
+  const [ospeBooks, setOspeBooks] = useState<FirestoreOspeBook[]>([]);
+  const [loadingOspeBooks, setLoadingOspeBooks] = useState(true);
+  const [ospeBankWarning, setOspeBankWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadingOspeBooks(true);
+    const unsub = subscribeAllOspeBooks(
+      (books) => {
+        setOspeBooks(books);
+        setLoadingOspeBooks(false);
+      },
+      (_reason, message) => setOspeBankWarning(message)
+    );
+    return () => unsub();
+  }, []);
+
+  const [ospeSubjectId, setOspeSubjectId] = useState<SubjectId>("gross_anatomy");
+  const [ospeTitle, setOspeTitle] = useState("");
+  const [ospeDriveUrl, setOspeDriveUrl] = useState("");
+  const [ospeDescription, setOspeDescription] = useState("");
+  const [ospePublishImmediately, setOspePublishImmediately] = useState(true);
+  const [ospeSaveStatus, setOspeSaveStatus] = useState<"success" | "success-local" | "error" | null>(null);
+  const [ospeSaveWarning, setOspeSaveWarning] = useState<string | null>(null);
+
+  const isOspeValid = ospeTitle.trim().length > 0 && ospeDriveUrl.trim().length > 0;
+
+  const handleSaveOspeBook = async () => {
+    if (!isOspeValid) return;
+    try {
+      const result = await addOspeBook({
+        title: ospeTitle.trim(),
+        driveUrl: ospeDriveUrl.trim(),
+        description: ospeDescription.trim(),
+        subjectId: ospeSubjectId,
+        status: (ospePublishImmediately ? "published" : "draft") as QuestionStatus,
+      });
+      if (result.source === "firestore") {
+        setOspeSaveStatus("success");
+        setOspeSaveWarning(null);
+        setTimeout(() => setOspeSaveStatus(null), 3000);
+      } else {
+        setOspeSaveStatus("success-local");
+        setOspeSaveWarning(result.message);
+        setTimeout(() => setOspeSaveStatus(null), 9000);
+      }
+      setOspeTitle("");
+      setOspeDriveUrl("");
+      setOspeDescription("");
+    } catch {
+      setOspeSaveStatus("error");
+      setOspeSaveWarning(null);
+      setTimeout(() => setOspeSaveStatus(null), 4000);
+    }
+  };
+
+  const handleDeleteOspeBook = async (b: FirestoreOspeBook) => {
+    try {
+      await deleteOspeBook(b.id);
+      setActionNotice(`Removed OSPE Book: "${b.title.slice(0, 40)}"`);
+      setTimeout(() => setActionNotice(null), 3500);
+    } catch {
+      setActionNotice("Failed to delete OSPE Book.");
+      setTimeout(() => setActionNotice(null), 3000);
+    }
+  };
+
+  const handleToggleOspeBookStatus = async (b: FirestoreOspeBook) => {
+    const nextStatus: QuestionStatus = b.status === "published" ? "draft" : "published";
+    try {
+      await updateOspeBookStatus(b.id, nextStatus);
+      setActionNotice(`OSPE Book status set to ${nextStatus}.`);
+      setTimeout(() => setActionNotice(null), 2500);
+    } catch {
+      setActionNotice("Failed to update OSPE Book status.");
+      setTimeout(() => setActionNotice(null), 2500);
+    }
+  };
+
+  const [ospeFilterSubject, setOspeFilterSubject] = useState<string>("all");
+  const [ospeFilterStatus, setOspeFilterStatus] = useState<string>("all");
+  const [ospeSearchQuery, setOspeSearchQuery] = useState("");
+
+  const filteredOspeBooks = useMemo(() => {
+    return ospeBooks
+      .filter((b) => {
+        if (ospeFilterSubject !== "all" && b.subjectId !== ospeFilterSubject) return false;
+        if (ospeFilterStatus !== "all" && b.status !== ospeFilterStatus) return false;
+        if (ospeSearchQuery.trim()) {
+          const query = ospeSearchQuery.toLowerCase();
+          const inTitle = b.title.toLowerCase().includes(query);
+          const inDesc = b.description?.toLowerCase().includes(query);
+          if (!inTitle && !inDesc) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [ospeBooks, ospeFilterSubject, ospeFilterStatus, ospeSearchQuery]);
+
   const effectiveBlock = isCustomBlock ? parseInt(customBlockInput, 10) || 1 : selectedBlock;
   const effectiveModuleName = isCustomModule
     ? customModuleName.trim() || "General Module"
     : selectedModulePreset;
   const effectiveModuleId = effectiveModuleName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
-  // Subheadings are scoped to one exact (Block, Module, Subject) combination,
+  // Topics are scoped to one exact (Block, Module, Subject) combination,
   // so re-subscribe any time that combination changes, and reset the
   // selection when it no longer applies to the freshly-loaded list.
   useEffect(() => {
-    setSelectedSubheadingId("");
-    setNewSubheadingName("");
-    setSubheadingsLoading(true);
-    const unsub = subscribeSubheadings(effectiveBlock, effectiveModuleId, subjectId, (list) => {
-      setSubheadings(list);
-      setSubheadingsLoading(false);
+    setSelectedTopicId("");
+    setNewTopicName("");
+    setTopicsLoading(true);
+    const unsub = subscribeTopics(effectiveBlock, effectiveModuleId, subjectId, (list) => {
+      setTopics(list);
+      setTopicsLoading(false);
     });
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveBlock, effectiveModuleId, subjectId]);
 
-  const selectedSubheading = subheadings.find((s) => s.id === selectedSubheadingId) || null;
+  const selectedTopic = topics.find((s) => s.id === selectedTopicId) || null;
 
-  const handleCreateSubheading = async () => {
-    const name = newSubheadingName.trim();
-    if (!name || creatingSubheading) return;
-    setCreatingSubheading(true);
+  const handleCreateTopic = async () => {
+    const name = newTopicName.trim();
+    if (!name || creatingTopic) return;
+    setCreatingTopic(true);
     try {
-      const id = await createSubheading(effectiveBlock, effectiveModuleId, subjectId, name);
-      setSelectedSubheadingId(id);
-      setNewSubheadingName("");
+      const id = await createTopic(effectiveBlock, effectiveModuleId, subjectId, name);
+      setSelectedTopicId(id);
+      setNewTopicName("");
     } finally {
-      setCreatingSubheading(false);
+      setCreatingTopic(false);
     }
   };
 
-  const handleDeleteSubheading = async (sh: SubheadingDoc) => {
-    await deleteSubheading(effectiveBlock, effectiveModuleId, subjectId, sh.id);
-    if (selectedSubheadingId === sh.id) setSelectedSubheadingId("");
+  const handleDeleteTopic = async (sh: TopicDoc) => {
+    await deleteTopic(effectiveBlock, effectiveModuleId, subjectId, sh.id);
+    if (selectedTopicId === sh.id) setSelectedTopicId("");
   };
 
-  // Resolves whatever is currently in the Subheading field to a concrete
+  // Resolves whatever is currently in the Topic field to a concrete
   // { id, name } at save time — so typing a name and hitting Save works
   // even if the separate "Add" button was never clicked first.
-  const resolveSubheadingForSave = async (): Promise<{ id: string | null; name: string | null }> => {
-    if (selectedSubheading) return { id: selectedSubheading.id, name: selectedSubheading.name };
-    const typed = newSubheadingName.trim();
+  const resolveTopicForSave = async (): Promise<{ id: string | null; name: string | null }> => {
+    if (selectedTopic) return { id: selectedTopic.id, name: selectedTopic.name };
+    const typed = newTopicName.trim();
     if (!typed) return { id: null, name: null };
-    const id = await createSubheading(effectiveBlock, effectiveModuleId, subjectId, typed);
-    setSelectedSubheadingId(id);
+    const id = await createTopic(effectiveBlock, effectiveModuleId, subjectId, typed);
+    setSelectedTopicId(id);
     return { id, name: typed };
   };
 
@@ -405,14 +520,14 @@ export default function AdminPanel() {
       return;
     }
     try {
-      const subheading = await resolveSubheadingForSave();
+      const topic = await resolveTopicForSave();
       const itemsToSave = validParsedMCQs.map((v) => ({
         subjectId,
         moduleId: effectiveModuleId,
         moduleName: effectiveModuleName,
         block: effectiveBlock,
-        subheadingId: subheading.id,
-        subheadingName: subheading.name,
+        topicId: topic.id,
+        topicName: topic.name,
         difficulty,
         q: v.q!,
         options: v.options!,
@@ -451,14 +566,14 @@ export default function AdminPanel() {
       return;
     }
     try {
-      const subheading = await resolveSubheadingForSave();
+      const topic = await resolveTopicForSave();
       await addQuestion({
         subjectId,
         moduleId: effectiveModuleId,
         moduleName: effectiveModuleName,
         block: effectiveBlock,
-        subheadingId: subheading.id,
-        subheadingName: subheading.name,
+        topicId: topic.id,
+        topicName: topic.name,
         difficulty,
         q: traditionalQ.trim(),
         options: options.map((o) => o.trim()),
@@ -499,7 +614,7 @@ export default function AdminPanel() {
   };
 
   // Bulk delete handler — removes every MCQ currently matched by the active filters
-  // (used to wipe out an entire subheading's questions in one go instead of one-by-one).
+  // (used to wipe out an entire topic's questions in one go instead of one-by-one).
   const handleBulkDeleteFiltered = async () => {
     const targets = filteredQuestions;
     if (targets.length === 0) {
@@ -510,7 +625,7 @@ export default function AdminPanel() {
     try {
       await bulkDeleteQuestions(targets.map((q) => ({ id: q.id, q: q.q })));
       setActionNotice(`Removed ${targets.length} MCQ${targets.length !== 1 ? "s" : ""}${
-        filterSubheading !== "all" ? ` from "${filterSubheading}"` : ""
+        filterTopic !== "all" ? ` from "${filterTopic}"` : ""
       }.`);
       setTimeout(() => setActionNotice(null), 3500);
     } catch {
@@ -542,34 +657,34 @@ export default function AdminPanel() {
       if (filterSubject !== "all" && q.subjectId !== filterSubject) return false;
       if (filterDifficulty !== "all" && q.difficulty !== filterDifficulty) return false;
       if (filterStatus !== "all" && q.status !== filterStatus) return false;
-      if (filterSubheading !== "all" && (q.subheadingName || "General / No subheading") !== filterSubheading) return false;
+      if (filterTopic !== "all" && (q.topicName || "General / No topic") !== filterTopic) return false;
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
         const inQ = q.q.toLowerCase().includes(query);
         const inOpts = q.options.some((o) => o.toLowerCase().includes(query));
         const inExp = q.explanation?.toLowerCase().includes(query);
         const inMod = q.moduleName?.toLowerCase().includes(query);
-        const inSub = q.subheadingName?.toLowerCase().includes(query);
+        const inSub = q.topicName?.toLowerCase().includes(query);
         if (!inQ && !inOpts && !inExp && !inMod && !inSub) return false;
       }
       return true;
     });
-  }, [allQuestions, filterBlock, filterSubject, filterDifficulty, filterStatus, filterSubheading, searchQuery]);
+  }, [allQuestions, filterBlock, filterSubject, filterDifficulty, filterStatus, filterTopic, searchQuery]);
 
   // Any change to the active filters invalidates a pending bulk-delete confirmation,
   // so the count shown in the confirm prompt always matches what's on screen.
   useEffect(() => {
     setBulkDeleteConfirm(false);
-  }, [filterBlock, filterSubject, filterDifficulty, filterStatus, filterSubheading, searchQuery]);
+  }, [filterBlock, filterSubject, filterDifficulty, filterStatus, filterTopic, searchQuery]);
 
-  // Distinct subheading names present in the bank, given the other active filters (Block/Subject scoped),
-  // used to populate the Subheading filter dropdown in the Manage tab.
-  const availableSubheadingNames = useMemo(() => {
+  // Distinct topic names present in the bank, given the other active filters (Block/Subject scoped),
+  // used to populate the Topic filter dropdown in the Manage tab.
+  const availableTopicNames = useMemo(() => {
     const names = new Set<string>();
     allQuestions.forEach((q) => {
       if (filterBlock !== "all" && q.block !== Number(filterBlock)) return;
       if (filterSubject !== "all" && q.subjectId !== filterSubject) return;
-      names.add(q.subheadingName || "General / No subheading");
+      names.add(q.topicName || "General / No topic");
     });
     return Array.from(names).sort();
   }, [allQuestions, filterBlock, filterSubject]);
@@ -644,6 +759,14 @@ export default function AdminPanel() {
                   style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
                 >
                   {lectures.length}
+                </span>
+              )}
+              {tab.id === "manage_ospe_book" && (
+                <span
+                  className="rounded-full px-2 py-0.2 text-[11px] font-mono font-bold"
+                  style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
+                >
+                  {ospeBooks.length}
                 </span>
               )}
             </button>
@@ -832,32 +955,34 @@ export default function AdminPanel() {
               </div>
             </div>
 
-            {/* 5. Subheading — 4th level of the hierarchy, scoped to this exact Block + Module + Subject */}
+            {/* 5. Topic — MCQ-side 4th level of the hierarchy, scoped to this exact Block + Module + Subject.
+                Kept deliberately separate from Lectures' Subheadings (see TopicDoc in types.ts) so the
+                two pickers never show or mutate the same list. */}
             <div className="mt-4 border-t pt-4" style={{ borderColor: t.border }}>
               <div className="mb-1.5">
                 <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  <ListTree size={13} /> Subheading
+                  <ListTree size={13} /> Topic
                 </label>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="text"
-                  value={selectedSubheading ? selectedSubheading.name : newSubheadingName}
+                  value={selectedTopic ? selectedTopic.name : newTopicName}
                   onChange={(e) => {
-                    setSelectedSubheadingId("");
-                    setNewSubheadingName(e.target.value);
+                    setSelectedTopicId("");
+                    setNewTopicName(e.target.value);
                   }}
-                  onKeyDown={(e) => e.key === "Enter" && handleCreateSubheading()}
-                  placeholder="Type a subheading, e.g. Coronary Circulation"
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateTopic()}
+                  placeholder="Type a topic, e.g. Coronary Circulation"
                   className="flex-1 min-w-[200px] rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
                   style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
                 />
-                {selectedSubheading ? (
+                {selectedTopic ? (
                   <button
                     onClick={() => {
-                      setSelectedSubheadingId("");
-                      setNewSubheadingName("");
+                      setSelectedTopicId("");
+                      setNewTopicName("");
                     }}
                     className="flex items-center gap-1 rounded-xl px-3 py-2.5 text-xs font-bold transition-all"
                     style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.textMuted }}
@@ -865,29 +990,29 @@ export default function AdminPanel() {
                     <X size={13} /> Clear
                   </button>
                 ) : (
-                  <Btn t={t} variant="secondary" disabled={!newSubheadingName.trim() || creatingSubheading} onClick={handleCreateSubheading}>
-                    {creatingSubheading ? "Adding\u2026" : "Add"}
+                  <Btn t={t} variant="secondary" disabled={!newTopicName.trim() || creatingTopic} onClick={handleCreateTopic}>
+                    {creatingTopic ? "Adding\u2026" : "Add"}
                   </Btn>
                 )}
               </div>
 
-              {/* Previously used subheadings in this scope, for quick reuse or removal */}
-              {subheadingsLoading ? (
+              {/* Previously used topics in this scope, for quick reuse or removal */}
+              {topicsLoading ? (
                 <div className="mt-3 flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
-                  <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
+                  <Loader2 size={13} className="animate-spin" /> Loading topics&hellip;
                 </div>
               ) : (
-                subheadings.length > 0 && (
+                topics.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
-                    {subheadings.map((s) => (
+                    {topics.map((s) => (
                       <Pill
                         key={s.id}
                         t={t}
                         tone="teal"
-                        active={selectedSubheadingId === s.id}
+                        active={selectedTopicId === s.id}
                         onClick={() => {
-                          setSelectedSubheadingId(s.id);
-                          setNewSubheadingName("");
+                          setSelectedTopicId(s.id);
+                          setNewTopicName("");
                         }}
                       >
                         {s.name}
@@ -895,7 +1020,7 @@ export default function AdminPanel() {
                           size={11}
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeleteSubheading(s);
+                            handleDeleteTopic(s);
                           }}
                         />
                       </Pill>
@@ -911,7 +1036,7 @@ export default function AdminPanel() {
               <Pill t={t} tone="teal">Block {effectiveBlock}</Pill>
               <Pill t={t} tone="purple">{effectiveModuleName}</Pill>
               <Pill t={t} tone="gold">{SUBJECT_META[subjectId].label}</Pill>
-              {selectedSubheading && <Pill t={t} tone="muted">{selectedSubheading.name}</Pill>}
+              {selectedTopic && <Pill t={t} tone="muted">{selectedTopic.name}</Pill>}
               <Pill t={t} tone={DIFF_TONE[difficulty] as any}>{difficulty}</Pill>
             </div>
           </Card>
@@ -1327,27 +1452,27 @@ export default function AdminPanel() {
                   </select>
                 </div>
 
-                {/* Subheading Filter */}
+                {/* Topic Filter */}
                 <div>
                   <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                    Subheading
+                    Topic
                   </label>
                   {loadingQuestions ? (
                     <div
                       className="flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold"
                       style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.textFaint }}
                     >
-                      <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
+                      <Loader2 size={13} className="animate-spin" /> Loading topics&hellip;
                     </div>
                   ) : (
                     <select
-                      value={filterSubheading}
-                      onChange={(e) => setFilterSubheading(e.target.value)}
+                      value={filterTopic}
+                      onChange={(e) => setFilterTopic(e.target.value)}
                       className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
                       style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
                     >
-                      <option value="all">All Subheadings</option>
-                      {availableSubheadingNames.map((name) => (
+                      <option value="all">All Topics</option>
+                      {availableTopicNames.map((name) => (
                         <option key={name} value={name}>{name}</option>
                       ))}
                     </select>
@@ -1363,14 +1488,14 @@ export default function AdminPanel() {
               Showing {filteredQuestions.length} of {allQuestions.length} Total MCQs
             </span>
             <div className="flex items-center gap-3">
-              {(filterBlock !== "all" || filterSubject !== "all" || filterDifficulty !== "all" || filterStatus !== "all" || filterSubheading !== "all" || searchQuery) && (
+              {(filterBlock !== "all" || filterSubject !== "all" || filterDifficulty !== "all" || filterStatus !== "all" || filterTopic !== "all" || searchQuery) && (
                 <button
                   onClick={() => {
                     setFilterBlock("all");
                     setFilterSubject("all");
                     setFilterDifficulty("all");
                     setFilterStatus("all");
-                    setFilterSubheading("all");
+                    setFilterTopic("all");
                     setSearchQuery("");
                     setBulkDeleteConfirm(false);
                   }}
@@ -1381,16 +1506,16 @@ export default function AdminPanel() {
                 </button>
               )}
 
-              {/* Bulk delete — only surfaced once a Subheading is selected, so it's scoped to
-                  "delete this subheading's MCQs" rather than an easy way to wipe everything. */}
-              {filterSubheading !== "all" && filteredQuestions.length > 0 && (
+              {/* Bulk delete — only surfaced once a Topic is selected, so it's scoped to
+                  "delete this topic's MCQs" rather than an easy way to wipe everything. */}
+              {filterTopic !== "all" && filteredQuestions.length > 0 && (
                 !bulkDeleteConfirm ? (
                   <button
                     onClick={() => setBulkDeleteConfirm(true)}
                     className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold transition-all text-red-400 hover:bg-red-500/10"
-                    title={`Delete all ${filteredQuestions.length} MCQs in "${filterSubheading}"`}
+                    title={`Delete all ${filteredQuestions.length} MCQs in "${filterTopic}"`}
                   >
-                    <Trash2 size={13} /> Delete All {filteredQuestions.length} in "{filterSubheading}"
+                    <Trash2 size={13} /> Delete All {filteredQuestions.length} in "{filterTopic}"
                   </button>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -1449,7 +1574,7 @@ export default function AdminPanel() {
                         <Pill t={t} tone="teal">Block {qItem.block}</Pill>
                         <Pill t={t} tone="purple">{qItem.moduleName || "General"}</Pill>
                         <Pill t={t} tone="gold">{subjectMeta?.label || qItem.subjectId}</Pill>
-                        {qItem.subheadingName && <Pill t={t} tone="muted">{qItem.subheadingName}</Pill>}
+                        {qItem.topicName && <Pill t={t} tone="muted">{qItem.topicName}</Pill>}
                         <Pill t={t} tone={DIFF_TONE[qItem.difficulty] as any}>{qItem.difficulty}</Pill>
                         <button
                           onClick={() => handleToggleStatus(qItem)}
@@ -1961,6 +2086,241 @@ export default function AdminPanel() {
           )}
         </div>
       )}
+
+      {/* ===================================================================== */}
+      {/* TAB 5: ADD OSPE BOOK                                                  */}
+      {/* ===================================================================== */}
+      {activeTab === "add_ospe_book" && (
+        <div className="flex flex-col gap-6">
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-center gap-2 border-b pb-3 mb-4" style={{ borderColor: t.border }}>
+              <BookMarked size={17} color={t.purple} />
+              <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>OSPE Book Details</span>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Discipline / Subject
+                </label>
+                <select
+                  value={ospeSubjectId}
+                  onChange={(e) => setOspeSubjectId(e.target.value as SubjectId)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  {SUBJECT_LIST.map((s) => (
+                    <option key={s} value={s} style={{ backgroundColor: t.surface, color: t.text }}>
+                      {SUBJECT_META[s].label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Book Title
+                </label>
+                <input
+                  type="text"
+                  value={ospeTitle}
+                  onChange={(e) => setOspeTitle(e.target.value)}
+                  placeholder="e.g. Gross Anatomy OSPE Guide"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Google Drive Link
+                </label>
+                <input
+                  type="text"
+                  value={ospeDriveUrl}
+                  onChange={(e) => setOspeDriveUrl(e.target.value)}
+                  placeholder="https://drive.google.com/file/d/.../view?usp=sharing"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+                <span className="mt-1 block text-[11px]" style={{ color: t.textFaint }}>
+                  Set the file's sharing to "Anyone with the link" in Google Drive so students can open it.
+                </span>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Description (optional)
+                </label>
+                <textarea
+                  value={ospeDescription}
+                  onChange={(e) => setOspeDescription(e.target.value)}
+                  placeholder="What this book covers..."
+                  rows={3}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm outline-none resize-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs font-bold cursor-pointer" style={{ color: t.textMuted }}>
+                <input
+                  type="checkbox"
+                  checked={ospePublishImmediately}
+                  onChange={(e) => setOspePublishImmediately(e.target.checked)}
+                  className="accent-purple-500 rounded"
+                />
+                Publish immediately (Live)
+              </label>
+
+              {ospeSaveStatus === "success" && (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.green}20`, color: t.green }}>
+                  <CheckCircle2 size={16} /> OSPE Book saved to Firestore!
+                </div>
+              )}
+              {ospeSaveStatus === "success-local" && (
+                <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold" style={{ backgroundColor: `${t.gold}20`, color: t.gold }}>
+                  <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                  <span>{ospeSaveWarning}</span>
+                </div>
+              )}
+              {ospeSaveStatus === "error" && (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.red}20`, color: t.red }}>
+                  <XCircle size={16} /> Failed to save OSPE Book. Try again.
+                </div>
+              )}
+
+              <Btn t={t} disabled={!isOspeValid} onClick={handleSaveOspeBook}>
+                Save OSPE Book
+              </Btn>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 6: MANAGE OSPE BOOKS                                              */}
+      {/* ===================================================================== */}
+      {activeTab === "manage_ospe_book" && (
+        <div className="flex flex-col gap-5">
+          {ospeBankWarning && (
+            <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold" style={{ backgroundColor: `${t.gold}20`, color: t.gold }}>
+              <AlertTriangle size={15} className="shrink-0 mt-0.5" /> <span>{ospeBankWarning}</span>
+            </div>
+          )}
+
+          {/* Filters */}
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex flex-col gap-3">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" color={t.textFaint} />
+                <input
+                  type="text"
+                  value={ospeSearchQuery}
+                  onChange={(e) => setOspeSearchQuery(e.target.value)}
+                  placeholder="Search OSPE Books by title or description..."
+                  className="w-full rounded-xl py-2.5 pl-9 pr-3 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={ospeFilterSubject}
+                  onChange={(e) => setOspeFilterSubject(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Subjects</option>
+                  {SUBJECT_LIST.map((s) => (
+                    <option key={s} value={s}>{SUBJECT_META[s].label}</option>
+                  ))}
+                </select>
+                <select
+                  value={ospeFilterStatus}
+                  onChange={(e) => setOspeFilterStatus(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="published">Published</option>
+                  <option value="draft">Draft</option>
+                </select>
+              </div>
+            </div>
+          </Card>
+
+          {loadingOspeBooks ? (
+            <div className="flex items-center justify-center py-16">
+              <Spinner t={t} size={22} label="Loading OSPE Books\u2026" />
+            </div>
+          ) : filteredOspeBooks.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center gap-2 rounded-2xl p-10 text-center"
+              style={{ backgroundColor: t.surfaceAlt, border: `1.5px dashed ${t.border}` }}
+            >
+              <Library size={22} color={t.textFaint} />
+              <p className="text-sm font-semibold" style={{ color: t.textMuted }}>No OSPE Books match these filters.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {filteredOspeBooks.map((b) => (
+                <div
+                  key={b.id}
+                  className="flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                      <Pill t={t} tone="gold">{SUBJECT_META[b.subjectId as SubjectId]?.label || b.subjectId}</Pill>
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                        style={{
+                          backgroundColor: b.status === "published" ? `${t.green}20` : `${t.textFaint}20`,
+                          color: b.status === "published" ? t.green : t.textFaint,
+                        }}
+                      >
+                        {b.status === "published" ? "Published" : "Draft"}
+                      </span>
+                    </div>
+                    <h4 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>{b.title}</h4>
+                    {b.description && (
+                      <p className="mt-0.5 text-xs" style={{ color: t.textMuted }}>{b.description}</p>
+                    )}
+                    <a
+                      href={b.driveUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 flex w-fit items-center gap-1 text-[11px] font-bold hover:opacity-80"
+                      style={{ color: t.teal }}
+                    >
+                      Open in Google Drive <ExternalLink size={11} />
+                    </a>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      onClick={() => handleToggleOspeBookStatus(b)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl"
+                      style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+                      title={b.status === "published" ? "Unpublish" : "Publish"}
+                    >
+                      {b.status === "published" ? <EyeOff size={15} color={t.textMuted} /> : <Eye size={15} color={t.green} />}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteOspeBook(b)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl"
+                      style={{ backgroundColor: `${t.red}15`, border: `1.5px solid ${t.red}40` }}
+                      title="Delete OSPE Book"
+                    >
+                      <Trash2 size={15} color={t.red} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
+
   );
 }

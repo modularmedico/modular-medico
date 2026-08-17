@@ -21,8 +21,8 @@ export interface FirestoreQuestion {
   moduleId: string;
   moduleName: string;
   block: number; // 1..15
-  subheadingId?: string | null;
-  subheadingName?: string | null;
+  topicId?: string | null;
+  topicName?: string | null;
   difficulty: Difficulty;
   q: string;
   options: string[];
@@ -56,6 +56,25 @@ export interface SubheadingDoc {
 }
 
 /**
+ * A Topic is the MCQ-Practice-side counterpart to a Lecture's Subheading.
+ * It is intentionally a SEPARATE 4th tier of the hierarchy — Block -> Module ->
+ * Subject -> Topic — stored in its own Firestore collection ("topics") so that
+ * creating/renaming/removing a Topic while tagging an MCQ can never add, rename,
+ * or remove a Lecture's Subheading (and vice versa), even though both are scoped
+ * to the exact same (block, moduleId, subjectId) triple. Before this existed,
+ * MCQs and Lectures shared the `subheadings` collection, so the two pickers
+ * always showed and mutated the exact same list.
+ */
+export interface TopicDoc {
+  id: string;
+  block: number;
+  moduleId: string;
+  subjectId: string;
+  name: string;
+  order: number;
+}
+
+/**
  * A single Lecture document as stored in the Firestore `lectures` collection.
  * Follows the exact same 4-tier hierarchy as MCQs — Block -> Module -> Subject ->
  * Subheading — so a video is always filed under the same scaffold students already
@@ -73,6 +92,23 @@ export interface FirestoreLecture {
   subheadingId?: string | null;
   subheadingName?: string | null;
   status: QuestionStatus; // reuse "draft" | "published"
+  createdAt?: number;
+}
+
+/**
+ * A single OSPE Book document as stored in the Firestore `ospe_books` collection.
+ * Each entry is simply a reference/label for a Google Drive PDF, scoped to one
+ * Subject (OSPE reference books are typically subject-wide, not tied to a single
+ * Block/Module/Subheading the way MCQs and Lectures are).
+ */
+export interface FirestoreOspeBook {
+  id: string;
+  title: string;
+  driveUrl: string;
+  description?: string;
+  subjectId: string;
+  status: QuestionStatus; // reuse "draft" | "published"
+  order?: number;
   createdAt?: number;
 }
 

@@ -13,11 +13,12 @@ import {
 import { db } from "../firebase";
 import { DEFAULT_MODULES, DEFAULT_QUESTIONS } from "../data/defaultCurriculum";
 import { DEFAULT_BLOCK_DEFINITIONS, type BlockDefinition } from "../data/subjects";
-import type { Difficulty, FirestoreQuestion, ModuleDoc, QuestionStatus, SubheadingDoc } from "../types";
+import type { Difficulty, FirestoreQuestion, ModuleDoc, QuestionStatus, SubheadingDoc, TopicDoc } from "../types";
 
 const LOCAL_MODULES_KEY = "modular_medico_custom_modules";
 const LOCAL_BLOCKS_KEY = "modular_medico_custom_blocks";
 const LOCAL_SUBHEADINGS_KEY = "modular_medico_subheadings";
+const LOCAL_TOPICS_KEY = "modular_medico_topics";
 
 /**
  * Merge questions from the three sources (built-in defaults, locally-cached
@@ -377,6 +378,155 @@ export async function deleteSubheading(block: number, moduleId: string, subjectI
   }
 }
 
+/* ----------------------------- Topics ------------------------------ */
+/*
+ * Topics are the MCQ-Practice-side 4th tier of the content hierarchy:
+ *   Block -> Module -> Subject -> Topic
+ * They are deliberately a SEPARATE Firestore collection ("topics") from the
+ * `subheadings` collection Lectures use — even though both are scoped to the
+ * exact same (block, moduleId, subjectId) triple — so the two lists never
+ * overlap. Adding/renaming/removing a Topic while tagging an MCQ never
+ * touches a Lecture's Subheading, and vice versa. Otherwise identical
+ * Firestore-with-localStorage-fallback pattern to Subheadings above.
+ */
+
+function topicsLocalKey(block: number, moduleId: string, subjectId: string) {
+  return `${LOCAL_TOPICS_KEY}__${block}__${moduleId}__${subjectId}`;
+}
+
+function getLocalTopics(block: number, moduleId: string, subjectId: string): TopicDoc[] {
+  try {
+    const raw = localStorage.getItem(topicsLocalKey(block, moduleId, subjectId));
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function setLocalTopics(block: number, moduleId: string, subjectId: string, list: TopicDoc[]) {
+  try {
+    localStorage.setItem(topicsLocalKey(block, moduleId, subjectId), JSON.stringify(list));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live topics scoped to one Block + Module + Subject combination. */
+export function subscribeTopics(
+  block: number,
+  moduleId: string,
+  subjectId: string,
+  cb: (topics: TopicDoc[]) => void
+) {
+  if (!moduleId || !subjectId) {
+    cb([]);
+    return () => {};
+  }
+
+  const emit = (fsList: TopicDoc[]) => {
+    const local = getLocalTopics(block, moduleId, subjectId);
+    const byId = new Map<string, TopicDoc>();
+    const nameKeys = new Set<string>();
+
+    fsList.forEach((s) => {
+      byId.set(s.id, s);
+      nameKeys.add(s.name.trim().toLowerCase());
+    });
+    local.forEach((s) => {
+      if (byId.has(s.id)) return;
+      const nameKey = s.name.trim().toLowerCase();
+      if (nameKeys.has(nameKey)) return;
+      byId.set(s.id, s);
+      nameKeys.add(nameKey);
+    });
+
+    const merged = Array.from(byId.values()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    setLocalTopics(block, moduleId, subjectId, merged);
+    cb(merged);
+  };
+
+  const q = query(
+    collection(db, "topics"),
+    where("block", "==", block),
+    where("moduleId", "==", moduleId),
+    where("subjectId", "==", subjectId)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const fsList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<TopicDoc, "id">) }));
+      emit(fsList);
+    },
+    (err) => {
+      console.warn("Firestore topics query fallback to local:", err.message);
+      emit([]);
+    }
+  );
+}
+
+/** Create a new Topic under a specific Block -> Module -> Subject. */
+export async function createTopic(block: number, moduleId: string, subjectId: string, name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  const current = getLocalTopics(block, moduleId, subjectId);
+
+  const existing = current.find((s) => s.name.trim().toLowerCase() === trimmed.toLowerCase());
+  if (existing) return existing.id;
+
+  const docData = { block, moduleId, subjectId, name: trimmed, order: current.length };
+  let id = "";
+  try {
+    const ref = await addDoc(collection(db, "topics"), docData);
+    id = ref.id;
+  } catch (err) {
+    console.warn("Firestore createTopic failed, saving locally:", err);
+    id = `local-tp-${Date.now()}-${Math.round(Math.random() * 1000)}`;
+  }
+  setLocalTopics(block, moduleId, subjectId, [...current, { id, ...docData }]);
+  return id;
+}
+
+/** Rename an existing Topic. */
+export async function renameTopic(
+  block: number,
+  moduleId: string,
+  subjectId: string,
+  topicId: string,
+  name: string
+) {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const current = getLocalTopics(block, moduleId, subjectId);
+  setLocalTopics(
+    block,
+    moduleId,
+    subjectId,
+    current.map((s) => (s.id === topicId ? { ...s, name: trimmed } : s))
+  );
+  try {
+    await updateDoc(doc(db, "topics", topicId), { name: trimmed });
+  } catch (err) {
+    console.warn("Firestore renameTopic failed, local storage updated:", err);
+  }
+}
+
+/** Delete a Topic. Questions already tagged with it keep their tag as free text. */
+export async function deleteTopic(block: number, moduleId: string, subjectId: string, topicId: string) {
+  const current = getLocalTopics(block, moduleId, subjectId);
+  setLocalTopics(
+    block,
+    moduleId,
+    subjectId,
+    current.filter((s) => s.id !== topicId)
+  );
+  try {
+    await deleteDoc(doc(db, "topics", topicId));
+  } catch (err) {
+    console.warn("Firestore deleteTopic failed:", err);
+  }
+}
+
 /* --------------------------- Questions ---------------------------- */
 
 export interface QuestionInput {
@@ -384,8 +534,8 @@ export interface QuestionInput {
   moduleId: string;
   moduleName: string;
   block: number;
-  subheadingId?: string | null;
-  subheadingName?: string | null;
+  topicId?: string | null;
+  topicName?: string | null;
   difficulty: Difficulty;
   q: string;
   options: string[];
@@ -554,9 +704,9 @@ export async function deleteQuestion(id: string, qText?: string) {
 }
 
 /**
- * Delete many questions at once (e.g. every MCQ under a subheading). Mirrors deleteQuestion
+ * Delete many questions at once (e.g. every MCQ under a topic). Mirrors deleteQuestion
  * but batches the Firestore writes and updates local storage a single time at the end,
- * which matters once a subheading has dozens of MCQs.
+ * which matters once a topic has dozens of MCQs.
  */
 export async function bulkDeleteQuestions(items: { id: string; q: string }[]) {
   if (items.length === 0) return;
@@ -685,15 +835,15 @@ export async function fetchPublishedBlock(
   moduleId?: string,
   block?: number,
   difficulty?: Difficulty | "all",
-  subheadingId?: string | null,
-  subheadingName?: string | null
+  topicId?: string | null,
+  topicName?: string | null
 ): Promise<FirestoreQuestion[]> {
   // Prefer matching by name when we have one — it's immune to id drift between
-  // Firestore and locally-cached subheading docs (see subscribeSubheadings),
-  // which was previously causing some subheadings' questions to never match.
-  const applySubheadingFilter = (list: FirestoreQuestion[]) => {
-    if (subheadingName) return list.filter((item) => (item.subheadingName || "").trim() === subheadingName.trim());
-    if (subheadingId) return list.filter((item) => item.subheadingId === subheadingId);
+  // Firestore and locally-cached topic docs (see subscribeTopics),
+  // which was previously causing some topics' questions to never match.
+  const applyTopicFilter = (list: FirestoreQuestion[]) => {
+    if (topicName) return list.filter((item) => (item.topicName || "").trim() === topicName.trim());
+    if (topicId) return list.filter((item) => item.topicId === topicId);
     return list;
   };
 
@@ -734,14 +884,14 @@ export async function fetchPublishedBlock(
       return true;
     });
 
-    const combined = applySubheadingFilter(mergeQuestionSources(defResults, localQs, fsResults));
+    const combined = applyTopicFilter(mergeQuestionSources(defResults, localQs, fsResults));
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedBlock failed, using default questions:", err);
   }
 
   // Fallback to local default questions
-  return applySubheadingFilter(
+  return applyTopicFilter(
     DEFAULT_QUESTIONS.filter((dq) => {
       if (dq.subjectId !== subjectId || dq.status !== "published") return false;
       if (moduleId && moduleId !== "all" && moduleId !== "custom") {
@@ -759,18 +909,18 @@ export async function fetchPublishedModuleExam(
   block: number,
   moduleId: string,
   difficulty?: Difficulty | "all",
-  subheadingName?: string | null,
+  topicName?: string | null,
   subjectId?: string | null
 ): Promise<FirestoreQuestion[]> {
-  // Subheadings are scoped per (block, moduleId, subjectId) — a Module spans multiple
-  // subjects, and two different subjects can legitimately each have a subheading named
+  // Topics are scoped per (block, moduleId, subjectId) — a Module spans multiple
+  // subjects, and two different subjects can legitimately each have a topic named
   // e.g. "Introduction". Matching by name alone would silently merge those into one
   // filter option and mix both subjects' questions together. So the module-wide picker
-  // must always disambiguate by subjectId + subheadingName together, never name alone.
-  const applySubheadingFilter = (list: FirestoreQuestion[]) => {
-    if (!subheadingName) return list;
+  // must always disambiguate by subjectId + topicName together, never name alone.
+  const applyTopicFilter = (list: FirestoreQuestion[]) => {
+    if (!topicName) return list;
     return list.filter((item) => {
-      const nameMatches = (item.subheadingName || "General / No subheading") === subheadingName;
+      const nameMatches = (item.topicName || "General / No topic") === topicName;
       if (!nameMatches) return false;
       // subjectId is optional for backwards compatibility, but should always be passed
       // by callers going forward — see PracticeSetup.tsx.
@@ -805,13 +955,13 @@ export async function fetchPublishedModuleExam(
       return true;
     });
 
-    const combined = applySubheadingFilter(mergeQuestionSources(defResults, localQs, fsResults));
+    const combined = applyTopicFilter(mergeQuestionSources(defResults, localQs, fsResults));
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedModuleExam failed, using default questions:", err);
   }
 
-  return applySubheadingFilter(
+  return applyTopicFilter(
     DEFAULT_QUESTIONS.filter((dq) => {
       if (dq.block !== block || dq.moduleId !== moduleId || dq.status !== "published") return false;
       if (difficulty && difficulty !== "all" && dq.difficulty !== difficulty) return false;

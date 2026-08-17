@@ -23,15 +23,15 @@ import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { SUBJECT_META, isSubjectId, DEFAULT_BLOCK_DEFINITIONS, type BlockDefinition } from "../data/subjects";
 import {
   subscribeBlockDefinitions,
-  subscribeSubheadings,
+  subscribeTopics,
   fetchPublishedBlock,
   fetchPublishedBlockExam,
   fetchPublishedModuleExam,
 } from "../services/adminContent";
-import type { Difficulty, PracticeConfig, SubheadingDoc } from "../types";
+import type { Difficulty, PracticeConfig, TopicDoc } from "../types";
 
-// Mirrors the label used in the admin question bank for MCQs with no subheading tag.
-const GENERAL_SUBHEADING_LABEL = "General / No subheading";
+// Mirrors the label used in the admin question bank for MCQs with no topic tag.
+const GENERAL_TOPIC_LABEL = "General / No topic";
 
 const TIMER_PRESETS = [
   { label: "3 min", seconds: 180 },
@@ -66,26 +66,26 @@ export default function PracticeSetup() {
   const [loading, setLoading] = useState(false);
   const [count, setCount] = useState<number | null>(null);
 
-  // Subheading picker — 4th tier of the hierarchy (Block -> Module -> Subject -> Subheading).
+  // Topic picker — 4th tier of the hierarchy (Block -> Module -> Subject -> Topic).
   // Only relevant when practicing a single Subject within a single Module. We select by
-  // *name* rather than the Firestore doc id: the same subheading can legitimately have
+  // *name* rather than the Firestore doc id: the same topic can legitimately have
   // different ids in Firestore vs. a locally-cached copy (e.g. one created while offline),
-  // and filtering by id risked silently matching zero questions even though the subheading
+  // and filtering by id risked silently matching zero questions even though the topic
   // pill was visible and selected.
-  const [subheadingDocs, setSubheadingDocs] = useState<SubheadingDoc[]>([]);
-  const [subheadingNamesFromQuestions, setSubheadingNamesFromQuestions] = useState<string[]>([]);
-  const [subheadingsLoaded, setSubheadingsLoaded] = useState(false);
-  const [selectedSubheadingName, setSelectedSubheadingName] = useState<string>("");
+  const [topicDocs, setTopicDocs] = useState<TopicDoc[]>([]);
+  const [topicNamesFromQuestions, setTopicNamesFromQuestions] = useState<string[]>([]);
+  const [topicsLoaded, setTopicsLoaded] = useState(false);
+  const [selectedTopicName, setSelectedTopicName] = useState<string>("");
 
-  // Module-level subheading picker — used when practicing a whole Module ("Practice Module"),
-  // which can span several subjects. Subheadings are scoped per (block, module, subject) in
-  // Firestore, so two different subjects can legitimately each have a subheading with the same
+  // Module-level topic picker — used when practicing a whole Module ("Practice Module"),
+  // which can span several subjects. Topics are scoped per (block, module, subject) in
+  // Firestore, so two different subjects can legitimately each have a topic with the same
   // name (e.g. "Introduction"). To avoid silently merging those together, every option here is
-  // keyed and filtered by the (subjectId, subheadingName) PAIR, never by name alone — and the
+  // keyed and filtered by the (subjectId, topicName) PAIR, never by name alone — and the
   // subject label is shown alongside the name so it's clear which subject each option belongs to.
-  const [moduleSubheadingOptions, setModuleSubheadingOptions] = useState<{ subjectId: string; name: string }[]>([]);
-  const [selectedModuleSubheading, setSelectedModuleSubheading] = useState<{ subjectId: string; name: string } | null>(null);
-  const [moduleSubheadingsLoaded, setModuleSubheadingsLoaded] = useState(false);
+  const [moduleTopicOptions, setModuleTopicOptions] = useState<{ subjectId: string; name: string }[]>([]);
+  const [selectedModuleTopic, setSelectedModuleTopic] = useState<{ subjectId: string; name: string } | null>(null);
+  const [moduleTopicsLoaded, setModuleTopicsLoaded] = useState(false);
 
   // Force strict settings in Exam mode
   useEffect(() => {
@@ -106,35 +106,35 @@ export default function PracticeSetup() {
   const isModuleExam = subjectId === "all" && moduleId !== "all";
   const isSubjectInModule = isSubjectId(subjectId);
 
-  // Load subheadings scoped to this exact Block + Module + Subject, resetting the
+  // Load topics scoped to this exact Block + Module + Subject, resetting the
   // selection whenever the underlying scope changes. Two sources are combined:
-  // the `subheadings` docs (for order/labels) and the actual subheading names
+  // the `topics` docs (for order/labels) and the actual topic names
   // present on published questions (the source of truth for what's practiceable) —
-  // so a subheading never fails to appear here just because its doc record didn't
+  // so a topic never fails to appear here just because its doc record didn't
   // sync, and never appears here without actually having any questions to show.
   useEffect(() => {
-    setSelectedSubheadingName("");
-    setSubheadingDocs([]);
-    setSubheadingNamesFromQuestions([]);
+    setSelectedTopicName("");
+    setTopicDocs([]);
+    setTopicNamesFromQuestions([]);
     if (!isSubjectInModule) {
-      setSubheadingsLoaded(true);
+      setTopicsLoaded(true);
       return;
     }
-    setSubheadingsLoaded(false);
+    setTopicsLoaded(false);
     let cancelled = false;
 
-    const unsubDocs = subscribeSubheadings(block, moduleId, subjectId, (docs) => {
-      if (!cancelled) setSubheadingDocs(docs);
+    const unsubDocs = subscribeTopics(block, moduleId, subjectId, (docs) => {
+      if (!cancelled) setTopicDocs(docs);
     });
 
     fetchPublishedBlock(subjectId, moduleId, block).then((qs) => {
       if (cancelled) return;
       const names = new Set<string>();
       qs.forEach((q) => {
-        if (q.subheadingName) names.add(q.subheadingName.trim());
+        if (q.topicName) names.add(q.topicName.trim());
       });
-      setSubheadingNamesFromQuestions(Array.from(names));
-      setSubheadingsLoaded(true);
+      setTopicNamesFromQuestions(Array.from(names));
+      setTopicsLoaded(true);
     });
 
     return () => {
@@ -144,18 +144,18 @@ export default function PracticeSetup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSubjectInModule, block, moduleId, subjectId]);
 
-  // Merge the two sources by name, ordered by the subheading docs' `order` where known,
+  // Merge the two sources by name, ordered by the topic docs' `order` where known,
   // then alphabetically for any question-only names that have no matching doc.
-  const subheadings = (() => {
+  const topics = (() => {
     const seen = new Set<string>();
     const merged: { name: string; order: number }[] = [];
-    subheadingDocs.forEach((s) => {
+    topicDocs.forEach((s) => {
       const key = s.name.trim().toLowerCase();
       if (seen.has(key)) return;
       seen.add(key);
       merged.push({ name: s.name.trim(), order: s.order ?? merged.length });
     });
-    subheadingNamesFromQuestions
+    topicNamesFromQuestions
       .slice()
       .sort()
       .forEach((name) => {
@@ -167,25 +167,25 @@ export default function PracticeSetup() {
     return merged.sort((a, b) => a.order - b.order);
   })();
 
-  // Discover the distinct (subject, subheading) pairs used across every published question in
+  // Discover the distinct (subject, topic) pairs used across every published question in
   // this Module, so the whole-module "Practice Module" flow can offer the same narrowing the
   // per-subject flow already has, instead of always bundling every subject's MCQs together —
-  // and without conflating two different subjects' identically-named subheadings.
+  // and without conflating two different subjects' identically-named topics.
   useEffect(() => {
-    setSelectedModuleSubheading(null);
-    setModuleSubheadingOptions([]);
+    setSelectedModuleTopic(null);
+    setModuleTopicOptions([]);
     if (!isModuleExam || !Number.isInteger(block)) {
-      setModuleSubheadingsLoaded(true);
+      setModuleTopicsLoaded(true);
       return;
     }
-    setModuleSubheadingsLoaded(false);
+    setModuleTopicsLoaded(false);
     let cancelled = false;
     fetchPublishedModuleExam(block, moduleId).then((qs) => {
       if (cancelled) return;
       const seen = new Set<string>();
       const options: { subjectId: string; name: string }[] = [];
       qs.forEach((q) => {
-        const name = q.subheadingName || GENERAL_SUBHEADING_LABEL;
+        const name = q.topicName || GENERAL_TOPIC_LABEL;
         const key = `${q.subjectId}::${name.toLowerCase()}`;
         if (seen.has(key)) return;
         seen.add(key);
@@ -196,8 +196,8 @@ export default function PracticeSetup() {
         const subjB = SUBJECT_META[b.subjectId as keyof typeof SUBJECT_META]?.label || b.subjectId;
         return subjA === subjB ? a.name.localeCompare(b.name) : subjA.localeCompare(subjB);
       });
-      setModuleSubheadingOptions(options);
-      setModuleSubheadingsLoaded(true);
+      setModuleTopicOptions(options);
+      setModuleTopicsLoaded(true);
     });
     return () => {
       cancelled = true;
@@ -213,8 +213,8 @@ export default function PracticeSetup() {
 
   const locked = block !== 1 && !isPremium;
 
-  const selectedSubheading = selectedSubheadingName
-    ? subheadings.find((s) => s.name === selectedSubheadingName) || null
+  const selectedTopic = selectedTopicName
+    ? topics.find((s) => s.name === selectedTopicName) || null
     : null;
 
   useEffect(() => {
@@ -229,14 +229,14 @@ export default function PracticeSetup() {
         block,
         moduleId,
         undefined,
-        selectedModuleSubheading?.name || null,
-        selectedModuleSubheading?.subjectId || null
+        selectedModuleTopic?.name || null,
+        selectedModuleTopic?.subjectId || null
       ).then((qs) => {
         setCount(qs.length);
         if (mode === "exam") setTimerSeconds(qs.length * 60);
       });
     } else if (isSubjectInModule) {
-      fetchPublishedBlock(subjectId, moduleId, block, undefined, null, selectedSubheadingName || null).then((qs) => {
+      fetchPublishedBlock(subjectId, moduleId, block, undefined, null, selectedTopicName || null).then((qs) => {
         setCount(qs.length);
         if (mode === "exam") setTimerSeconds(qs.length * 60);
       });
@@ -250,8 +250,8 @@ export default function PracticeSetup() {
     isModuleExam,
     isSubjectInModule,
     mode,
-    selectedSubheadingName,
-    selectedModuleSubheading,
+    selectedTopicName,
+    selectedModuleTopic,
   ]);
 
   if (!Number.isInteger(block) || (!isFullBlock && !isModuleExam && !isSubjectInModule)) {
@@ -294,11 +294,11 @@ export default function PracticeSetup() {
         block,
         moduleId,
         diff,
-        selectedModuleSubheading?.name || null,
-        selectedModuleSubheading?.subjectId || null
+        selectedModuleTopic?.name || null,
+        selectedModuleTopic?.subjectId || null
       );
     } else {
-      questions = await fetchPublishedBlock(subjectId, moduleId, block, diff, null, selectedSubheadingName || null);
+      questions = await fetchPublishedBlock(subjectId, moduleId, block, diff, null, selectedTopicName || null);
     }
     setLoading(false);
     if (questions.length === 0) return;
@@ -317,12 +317,12 @@ export default function PracticeSetup() {
       ? `Block ${block}: Full Exam`
       : isModuleExam
       ? `Block ${block} \u00b7 ${targetModule?.name || moduleId}${
-          selectedModuleSubheading
-            ? ` \u00b7 ${SUBJECT_META[selectedModuleSubheading.subjectId as keyof typeof SUBJECT_META]?.label || selectedModuleSubheading.subjectId} \u2013 ${selectedModuleSubheading.name}`
+          selectedModuleTopic
+            ? ` \u00b7 ${SUBJECT_META[selectedModuleTopic.subjectId as keyof typeof SUBJECT_META]?.label || selectedModuleTopic.subjectId} \u2013 ${selectedModuleTopic.name}`
             : ""
         }`
       : `${SUBJECT_META[subjectId as keyof typeof SUBJECT_META]?.label || ""} (${targetModule?.name || `B${block}`})${
-          selectedSubheading ? ` \u00b7 ${selectedSubheading.name}` : ""
+          selectedTopic ? ` \u00b7 ${selectedTopic.name}` : ""
         }`;
 
     startSession(
@@ -477,28 +477,28 @@ export default function PracticeSetup() {
           )}
         </div>
 
-        {/* Subheading — 4th tier of the hierarchy, only shown when this Subject/Module has any */}
-        {isSubjectInModule && (subheadings.length > 0 || !subheadingsLoaded) && (
+        {/* Topic — 4th tier of the hierarchy, only shown when this Subject/Module has any */}
+        {isSubjectInModule && (topics.length > 0 || !topicsLoaded) && (
           <div>
             <span className="mb-2 block text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
-              Subheading
+              Topic
             </span>
-            {!subheadingsLoaded ? (
+            {!topicsLoaded ? (
               <span className="flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
-                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
+                <Loader2 size={13} className="animate-spin" /> Checking topics&hellip;
               </span>
             ) : (
               <div className="flex flex-wrap gap-2">
-                <Pill t={t} tone="muted" active={selectedSubheadingName === ""} onClick={() => setSelectedSubheadingName("")}>
-                  All Subheadings
+                <Pill t={t} tone="muted" active={selectedTopicName === ""} onClick={() => setSelectedTopicName("")}>
+                  All Topics
                 </Pill>
-                {subheadings.map((s) => (
+                {topics.map((s) => (
                   <Pill
                     key={s.name}
                     t={t}
                     tone="teal"
-                    active={selectedSubheadingName === s.name}
-                    onClick={() => setSelectedSubheadingName(s.name)}
+                    active={selectedTopicName === s.name}
+                    onClick={() => setSelectedTopicName(s.name)}
                   >
                     {s.name}
                   </Pill>
@@ -508,40 +508,40 @@ export default function PracticeSetup() {
           </div>
         )}
 
-        {/* Subheading — Module-wide picker, shown when practicing a whole Module ("Practice
-            Module") that has published MCQs tagged with subheadings across its subjects.
-            Each option is a (subject, subheading) pair — labelled with its subject — so two
-            different subjects' identically-named subheadings are never conflated. */}
-        {isModuleExam && (moduleSubheadingOptions.length > 0 || !moduleSubheadingsLoaded) && (
+        {/* Topic — Module-wide picker, shown when practicing a whole Module ("Practice
+            Module") that has published MCQs tagged with topics across its subjects.
+            Each option is a (subject, topic) pair — labelled with its subject — so two
+            different subjects' identically-named topics are never conflated. */}
+        {isModuleExam && (moduleTopicOptions.length > 0 || !moduleTopicsLoaded) && (
           <div>
             <span className="mb-2 block text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
-              Subheading
+              Topic
             </span>
-            {!moduleSubheadingsLoaded ? (
+            {!moduleTopicsLoaded ? (
               <p className="flex items-center gap-1.5 text-xs" style={{ color: t.textMuted }}>
-                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
+                <Loader2 size={13} className="animate-spin" /> Checking topics&hellip;
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 <Pill
                   t={t}
                   tone="muted"
-                  active={selectedModuleSubheading === null}
-                  onClick={() => setSelectedModuleSubheading(null)}
+                  active={selectedModuleTopic === null}
+                  onClick={() => setSelectedModuleTopic(null)}
                 >
-                  All Subheadings
+                  All Topics
                 </Pill>
-                {moduleSubheadingOptions.map((opt) => {
+                {moduleTopicOptions.map((opt) => {
                   const subjLabel = SUBJECT_META[opt.subjectId as keyof typeof SUBJECT_META]?.label || opt.subjectId;
                   const active =
-                    selectedModuleSubheading?.subjectId === opt.subjectId && selectedModuleSubheading?.name === opt.name;
+                    selectedModuleTopic?.subjectId === opt.subjectId && selectedModuleTopic?.name === opt.name;
                   return (
                     <Pill
                       key={`${opt.subjectId}::${opt.name}`}
                       t={t}
                       tone="teal"
                       active={active}
-                      onClick={() => setSelectedModuleSubheading(opt)}
+                      onClick={() => setSelectedModuleTopic(opt)}
                     >
                       <span style={{ opacity: 0.65, fontWeight: 600 }}>{subjLabel}:</span> {opt.name}
                     </Pill>
