@@ -11,19 +11,35 @@ import {
   X,
   CheckCircle2,
   XCircle,
-  ClipboardCopy,
   FlagOff,
   Monitor,
   SkipForward,
+  Sparkles,
+  MessageCircleQuestion,
+  Lightbulb,
+  Brain,
+  Microscope,
+  ChevronDown,
+  X as CloseIcon,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
+import Spinner from "../components/Spinner";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import { SUBJECT_META } from "../data/subjects";
 import { addBookmark, recordQuizAttempt } from "../services/firestore";
 import type { AnswerRecord } from "../types";
+
+type AiMode = "simple" | "analogy" | "mnemonic" | "depth";
+
+const AI_MODE_OPTIONS: { mode: AiMode; label: string; icon: typeof Sparkles }[] = [
+  { mode: "simple", label: "Explain in Simple words", icon: MessageCircleQuestion },
+  { mode: "analogy", label: "Explain with analogy", icon: Lightbulb },
+  { mode: "mnemonic", label: "Make mnemonics", icon: Brain },
+  { mode: "depth", label: "In Depth Explanation", icon: Microscope },
+];
 
 export default function Practice() {
   const navigate = useNavigate();
@@ -37,7 +53,11 @@ export default function Practice() {
 
   const [selected, setSelected] = useState<number | null>(null);
   const [answered, setAnswered] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [aiMenuOpen, setAiMenuOpen] = useState(false);
+  const [aiMode, setAiMode] = useState<AiMode | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(() => {
     if (!session) return null;
     if (session.config.customTimerSeconds) return session.config.customTimerSeconds;
@@ -229,15 +249,45 @@ export default function Practice() {
     }
   };
 
-  const aiExplain = async () => {
-    const text = `Question: ${question.q}\nMy answer: ${question.options[selected ?? 0]}`;
+  // Fetches an AI-generated explanation from our own /api/ai-explain endpoint, which
+  // proxies the request to OpenRouter (server-side key) and tries several free models.
+  const askAi = async (mode: AiMode) => {
+    setAiMenuOpen(false);
+    setAiMode(mode);
+    setAiLoading(true);
+    setAiAnswer(null);
+    setAiError(null);
     try {
-      await navigator.clipboard.writeText(text);
+      const res = await fetch("/api/ai-explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: question.q,
+          options: question.options,
+          correctAnswer: question.options[question.correct],
+          userAnswer: selected !== null ? question.options[selected] : null,
+          explanation: question.explanation,
+          mode,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAiError(data?.error || "Couldn't get an AI explanation right now. Please try again.");
+      } else {
+        setAiAnswer(data.answer);
+      }
     } catch {
-      /* clipboard unavailable — non-fatal */
+      setAiError("Network error — check your connection and try again.");
+    } finally {
+      setAiLoading(false);
     }
-    setCopied(true);
-    window.open("https://claude.ai/new", "_blank");
+  };
+
+  const closeAiPanel = () => {
+    setAiMode(null);
+    setAiAnswer(null);
+    setAiError(null);
+    setAiLoading(false);
   };
 
   const mm = secondsLeft !== null ? String(Math.floor(secondsLeft / 60)).padStart(2, "0") : null;
@@ -602,12 +652,89 @@ export default function Practice() {
               <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 13 }}>{selected === question.correct ? "Correct" : "Not quite"}</span>
             </div>
             <p style={{ color: t.textMuted, fontSize: 13.5, lineHeight: 1.6, marginBottom: 10 }}>{question.explanation}</p>
-            <button onClick={aiExplain} className="inline-flex items-center gap-1.5 text-xs font-bold" style={{ color: t.teal }}>
-              <ClipboardCopy size={13} /> {copied ? "Copied \u2014 opening chatbot\u2026" : "AI Explain"}
-            </button>
+
+            <div className="relative inline-block">
+              <button
+                onClick={() => setAiMenuOpen((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
+                style={{ backgroundColor: `${t.teal}1A`, color: t.teal }}
+              >
+                <Sparkles size={13} /> Ask AI
+                <ChevronDown size={13} style={{ transform: aiMenuOpen ? "rotate(180deg)" : undefined, transition: "transform 120ms" }} />
+              </button>
+
+              {aiMenuOpen && (
+                <div
+                  className="absolute left-0 top-full z-20 mt-1.5 w-60 overflow-hidden rounded-2xl shadow-lg"
+                  style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+                >
+                  {AI_MODE_OPTIONS.map(({ mode, label, icon: Icon }) => (
+                    <button
+                      key={mode}
+                      onClick={() => askAi(mode)}
+                      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-bold hover:opacity-80"
+                      style={{ color: t.text, borderBottom: `1px solid ${t.border}` }}
+                    >
+                      <Icon size={15} color={t.teal} /> {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </Card>
+
+      {/* AI explanation panel — opens once an "Ask AI" option is picked */}
+      {aiMode && (
+        <div
+          className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 md:items-center md:p-4"
+          onClick={closeAiPanel}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[80vh] w-full overflow-y-auto rounded-t-3xl p-5 md:max-w-lg md:rounded-3xl"
+            style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const opt = AI_MODE_OPTIONS.find((o) => o.mode === aiMode)!;
+                  const Icon = opt.icon;
+                  return (
+                    <>
+                      <Icon size={17} color={t.teal} />
+                      <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>{opt.label}</span>
+                    </>
+                  );
+                })()}
+              </div>
+              <button onClick={closeAiPanel} style={{ color: t.textFaint }}>
+                <CloseIcon size={18} />
+              </button>
+            </div>
+
+            {aiLoading && <Spinner t={t} label="Asking the AI tutor\u2026" className="py-8" />}
+
+            {!aiLoading && aiError && (
+              <div>
+                <p style={{ color: t.red, fontSize: 13.5, lineHeight: 1.6 }}>{aiError}</p>
+                <button
+                  onClick={() => askAi(aiMode)}
+                  className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold"
+                  style={{ color: t.teal }}
+                >
+                  <Sparkles size={13} /> Try again
+                </button>
+              </div>
+            )}
+
+            {!aiLoading && !aiError && aiAnswer && (
+              <p style={{ color: t.textMuted, fontSize: 13.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{aiAnswer}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-3">
         <button
