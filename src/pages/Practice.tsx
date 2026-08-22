@@ -601,10 +601,8 @@ export default function Practice() {
       </div>
 
       <Card t={t} style={{ padding: 24, position: "relative" }}>
-        <div className="mb-5 flex items-start justify-between gap-3">
-          <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 18, lineHeight: 1.4 }}>{question.q}</h2>
-
-          <div className="relative shrink-0">
+        <div className="mb-3 flex justify-end">
+          <div className="relative">
             <button
               onClick={() => setAiMenuOpen((v) => !v)}
               className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
@@ -633,6 +631,8 @@ export default function Practice() {
             )}
           </div>
         </div>
+
+        <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 18, lineHeight: 1.4, marginBottom: 20 }}>{question.q}</h2>
         <div className="flex flex-col gap-3">
           {question.options.map((opt, i) => {
             const isSelected = selected === i;
