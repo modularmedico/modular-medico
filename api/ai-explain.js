@@ -6,14 +6,22 @@
 // Hand-picked free models to fall back on if the live catalog fetch below fails,
 // or if the top live models are rate-limited / temporarily down. OpenRouter's
 // free lineup rotates over time, so this list is a safety net, not the primary source.
+// Plain instruct models (not "thinking"/reasoning models) are listed first since
+// reasoning models are the ones most likely to leak their chain-of-thought into
+// the visible answer.
 const FALLBACK_FREE_MODELS = [
   "meta-llama/llama-3.3-70b-instruct:free",
-  "deepseek/deepseek-chat-v3.1:free",
   "google/gemma-3-12b-it:free",
-  "qwen/qwen3-235b-a22b:free",
-  "openai/gpt-oss-20b:free",
   "mistralai/mistral-small-3.2-24b-instruct:free",
+  "deepseek/deepseek-chat-v3.1:free",
+  "openai/gpt-oss-20b:free",
+  "qwen/qwen3-235b-a22b:free",
 ];
+
+// Model-name fragments associated with "thinking"/reasoning-style models, which are
+// more prone to spilling their chain-of-thought into the response body. We don't
+// exclude them outright (they're still useful fallbacks) but we try them last.
+const REASONING_MODEL_HINTS = ["think", "reasoning", "r1", "qwq", "o1", "o3"];
 
 const MODE_INSTRUCTIONS = {
   simple:
@@ -35,7 +43,7 @@ const MODE_INSTRUCTIONS = {
     "medical student preparing for exams.",
 };
 
-const MAX_MODEL_ATTEMPTS = 3;
+const MAX_MODEL_ATTEMPTS = 4;
 const PER_MODEL_TIMEOUT_MS = 9000;
 
 export default async function handler(req, res) {
@@ -82,9 +90,14 @@ export default async function handler(req, res) {
     .join("\n\n");
 
   const systemPrompt =
-    `You are a friendly, encouraging medical school tutor helping a student understand an ` +
-    `MCQ they just practiced. ${MODE_INSTRUCTIONS[mode]} Respond in plain text only - do not ` +
-    `use markdown symbols like asterisks, hashes, or bullet dashes.`;
+    `You are a friendly, encouraging medical school tutor helping a student understand an MCQ ` +
+    `they just practiced. ${MODE_INSTRUCTIONS[mode]}\n\n` +
+    `Critical output rules: reply with ONLY the final explanation itself, and nothing else. ` +
+    `Do not show your reasoning, planning, or thinking process. Do not include meta-commentary ` +
+    `such as "Here's a thinking process", "Let me analyze this", numbered analysis steps, or ` +
+    `any restatement of these instructions. Do not use <think> tags. Start your reply directly ` +
+    `with the explanation itself, as if speaking straight to the student. Respond in plain text ` +
+    `only - no markdown symbols like asterisks, hashes, or bullet dashes.`;
 
   const modelsToTry = (await getModelCandidates(apiKey)).slice(0, MAX_MODEL_ATTEMPTS);
 
@@ -110,6 +123,9 @@ export default async function handler(req, res) {
           ],
           temperature: mode === "mnemonic" ? 0.9 : 0.6,
           max_tokens: mode === "depth" ? 650 : 320,
+          // Ask OpenRouter to strip any chain-of-thought/reasoning tokens the
+          // underlying model produces, so only the final answer comes back.
+          reasoning: { exclude: true },
         }),
         signal: controller.signal,
       });
@@ -121,12 +137,14 @@ export default async function handler(req, res) {
       }
 
       const data = await r.json();
-      const text = data?.choices?.[0]?.message?.content?.trim();
-      if (text) {
+      const raw = data?.choices?.[0]?.message?.content?.trim();
+      const text = raw ? cleanExplanation(raw) : "";
+
+      if (text && !looksLikeLeakedReasoning(text)) {
         res.status(200).json({ answer: text, model });
         return;
       }
-      lastError = `${model}: empty response`;
+      lastError = text ? `${model}: response looked like leaked reasoning` : `${model}: empty response`;
     } catch (err) {
       lastError = `${model}: ${err && err.message ? err.message : "request failed"}`;
     }
@@ -138,11 +156,45 @@ export default async function handler(req, res) {
 }
 
 /**
+ * Strips common chain-of-thought wrappers a model might emit despite instructions
+ * (e.g. <think>...</think> blocks some providers include inline in `content`).
+ * If a closing think tag is found, everything up to and including it is dropped.
+ */
+function cleanExplanation(text) {
+  let cleaned = text;
+  const lastThinkClose = cleaned.toLowerCase().lastIndexOf("</think>");
+  if (lastThinkClose !== -1) {
+    cleaned = cleaned.slice(lastThinkClose + "</think>".length);
+  }
+  cleaned = cleaned.replace(/<\/?think[^>]*>/gi, "");
+  return cleaned.trim();
+}
+
+/**
+ * Heuristic check for a response that still looks like exposed reasoning rather
+ * than a clean final answer (numbered meta-analysis steps, "thinking process"
+ * preambles, etc.). If this trips, we treat the attempt as failed and move on
+ * to the next model rather than showing raw reasoning to the student.
+ */
+function looksLikeLeakedReasoning(text) {
+  const lower = text.toLowerCase();
+  const startsWithMeta = /^(okay,?\s|here'?s\s(a|my)\s(thinking|thought)|let me think|let'?s think|first,?\s+i\s+need\s+to)/i.test(text.trim());
+  if (startsWithMeta) return true;
+  if (lower.includes("thinking process") || lower.includes("analyze user") || lower.includes("user request")) return true;
+  // Numbered bold-header steps like "1. **Analyze...**" or "2. **Deconstruct...**"
+  const numberedHeaders = text.match(/^\s*\d+\.\s+\*\*/gm);
+  if (numberedHeaders && numberedHeaders.length >= 2) return true;
+  return false;
+}
+
+/**
  * Builds the ordered list of free model IDs to attempt. Prefers models currently
  * marked $0 on OpenRouter's live catalog (since the free lineup rotates), and
- * falls back to a hand-picked list if that lookup fails for any reason.
+ * falls back to a hand-picked list if that lookup fails for any reason. Plain
+ * instruct models are tried before "thinking"/reasoning-style models.
  */
 async function getModelCandidates(apiKey) {
+  let ids = FALLBACK_FREE_MODELS;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -160,11 +212,15 @@ async function getModelCandidates(apiKey) {
         .filter((id) => typeof id === "string" && id.endsWith(":free"));
 
       if (liveFreeIds.length > 0) {
-        return Array.from(new Set([...liveFreeIds, ...FALLBACK_FREE_MODELS]));
+        ids = Array.from(new Set([...liveFreeIds, ...FALLBACK_FREE_MODELS]));
       }
     }
   } catch {
-    /* live catalog lookup failed — use the hand-picked fallback list below */
+    /* live catalog lookup failed — use the hand-picked fallback list */
   }
-  return FALLBACK_FREE_MODELS;
+
+  const isReasoningModel = (id) => REASONING_MODEL_HINTS.some((hint) => id.toLowerCase().includes(hint));
+  const plain = ids.filter((id) => !isReasoningModel(id));
+  const reasoning = ids.filter(isReasoningModel);
+  return [...plain, ...reasoning];
 }
