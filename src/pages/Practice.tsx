@@ -600,8 +600,39 @@ export default function Practice() {
         )}
       </div>
 
-      <Card t={t} style={{ padding: 24 }}>
-        <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 18, lineHeight: 1.4, marginBottom: 20 }}>{question.q}</h2>
+      <Card t={t} style={{ padding: 24, position: "relative" }}>
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 18, lineHeight: 1.4 }}>{question.q}</h2>
+
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setAiMenuOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
+              style={{ backgroundColor: `${t.teal}1A`, color: t.teal }}
+            >
+              <Sparkles size={13} /> Ask AI
+              <ChevronDown size={13} style={{ transform: aiMenuOpen ? "rotate(180deg)" : undefined, transition: "transform 120ms" }} />
+            </button>
+
+            {aiMenuOpen && (
+              <div
+                className="absolute right-0 top-full z-30 mt-1.5 w-60 overflow-hidden rounded-2xl shadow-lg"
+                style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+              >
+                {AI_MODE_OPTIONS.map(({ mode, label, icon: Icon }) => (
+                  <button
+                    key={mode}
+                    onClick={() => askAi(mode)}
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-bold hover:opacity-80"
+                    style={{ color: t.text, borderBottom: `1px solid ${t.border}` }}
+                  >
+                    <Icon size={15} color={t.teal} /> {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
         <div className="flex flex-col gap-3">
           {question.options.map((opt, i) => {
             const isSelected = selected === i;
@@ -651,36 +682,7 @@ export default function Practice() {
               {selected === question.correct ? <CheckCircle2 size={15} color={t.green} /> : <XCircle size={15} color={t.red} />}
               <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 13 }}>{selected === question.correct ? "Correct" : "Not quite"}</span>
             </div>
-            <p style={{ color: t.textMuted, fontSize: 13.5, lineHeight: 1.6, marginBottom: 10 }}>{question.explanation}</p>
-
-            <div className="relative inline-block">
-              <button
-                onClick={() => setAiMenuOpen((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
-                style={{ backgroundColor: `${t.teal}1A`, color: t.teal }}
-              >
-                <Sparkles size={13} /> Ask AI
-                <ChevronDown size={13} style={{ transform: aiMenuOpen ? "rotate(180deg)" : undefined, transition: "transform 120ms" }} />
-              </button>
-
-              {aiMenuOpen && (
-                <div
-                  className="absolute left-0 top-full z-20 mt-1.5 w-60 overflow-hidden rounded-2xl shadow-lg"
-                  style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
-                >
-                  {AI_MODE_OPTIONS.map(({ mode, label, icon: Icon }) => (
-                    <button
-                      key={mode}
-                      onClick={() => askAi(mode)}
-                      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-bold hover:opacity-80"
-                      style={{ color: t.text, borderBottom: `1px solid ${t.border}` }}
-                    >
-                      <Icon size={15} color={t.teal} /> {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <p style={{ color: t.textMuted, fontSize: 13.5, lineHeight: 1.6 }}>{question.explanation}</p>
           </div>
         )}
       </Card>
