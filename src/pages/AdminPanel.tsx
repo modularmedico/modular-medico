@@ -191,6 +191,14 @@ export default function AdminPanel() {
   const [editDifficulty, setEditDifficulty] = useState<Difficulty>("medium");
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  // Subheading (Topic) picker for the card currently being edited — scoped to
+  // that question's own (block, moduleId, subjectId), same as the Add-MCQ form's
+  // picker but kept independent so editing one card never touches the Add form.
+  const [editTopics, setEditTopics] = useState<TopicDoc[]>([]);
+  const [editTopicsLoading, setEditTopicsLoading] = useState(true);
+  const [editSelectedTopicId, setEditSelectedTopicId] = useState<string>("");
+  const [editNewTopicName, setEditNewTopicName] = useState("");
+  const [editCreatingTopic, setEditCreatingTopic] = useState(false);
 
   useEffect(() => {
     try {
@@ -719,6 +727,59 @@ export default function AdminPanel() {
     setEditDifficulty(qItem.difficulty);
     setEditError(null);
     setDeleteConfirmId(null);
+    // Topic field seeds from the question's current tag; cleared once the
+    // subscription below resolves the id against the live topics list.
+    setEditSelectedTopicId(qItem.topicId || "");
+    setEditNewTopicName(qItem.topicId ? "" : qItem.topicName || "");
+  };
+
+  // Subheading (Topic) list for whichever card is currently being edited,
+  // scoped to that question's own (block, moduleId, subjectId) — mirrors the
+  // Add-MCQ form's subscription but keyed off the card being edited instead.
+  useEffect(() => {
+    if (!editingId) return;
+    const qItem = allQuestions.find((q) => q.id === editingId);
+    if (!qItem) return;
+    setEditTopicsLoading(true);
+    const unsub = subscribeTopics(qItem.block, qItem.moduleId, qItem.subjectId, (list) => {
+      setEditTopics(list);
+      setEditTopicsLoading(false);
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
+
+  const editSelectedTopic = editTopics.find((s) => s.id === editSelectedTopicId) || null;
+
+  const handleCreateEditTopic = async (qItem: FirestoreQuestion) => {
+    const name = editNewTopicName.trim();
+    if (!name || editCreatingTopic) return;
+    setEditCreatingTopic(true);
+    try {
+      const id = await createTopic(qItem.block, qItem.moduleId, qItem.subjectId, name);
+      setEditSelectedTopicId(id);
+      setEditNewTopicName("");
+    } finally {
+      setEditCreatingTopic(false);
+    }
+  };
+
+  const handleDeleteEditTopic = async (qItem: FirestoreQuestion, s: TopicDoc) => {
+    await deleteTopic(qItem.block, qItem.moduleId, qItem.subjectId, s.id);
+    if (editSelectedTopicId === s.id) setEditSelectedTopicId("");
+  };
+
+  // Resolves whatever is currently in the edit form's Topic field to a
+  // concrete { id, name } at save time — same pattern as resolveTopicForSave,
+  // so typing a new subheading and hitting Save Changes works without a
+  // separate "Add" click first.
+  const resolveEditTopic = async (qItem: FirestoreQuestion): Promise<{ id: string | null; name: string | null }> => {
+    if (editSelectedTopic) return { id: editSelectedTopic.id, name: editSelectedTopic.name };
+    const typed = editNewTopicName.trim();
+    if (!typed) return { id: null, name: null };
+    const id = await createTopic(qItem.block, qItem.moduleId, qItem.subjectId, typed);
+    setEditSelectedTopicId(id);
+    return { id, name: typed };
   };
 
   const handleCancelEdit = () => {
@@ -738,13 +799,14 @@ export default function AdminPanel() {
     setEditSaving(true);
     setEditError(null);
     try {
+      const topic = await resolveEditTopic(qItem);
       await updateQuestion(qItem.id, {
         subjectId: qItem.subjectId,
         moduleId: qItem.moduleId,
         moduleName: qItem.moduleName,
         block: qItem.block,
-        topicId: qItem.topicId ?? null,
-        topicName: qItem.topicName ?? null,
+        topicId: topic.id,
+        topicName: topic.name,
         difficulty: editDifficulty,
         q: editQ.trim(),
         options: editOptions.map((o) => o.trim()),
@@ -1911,6 +1973,81 @@ export default function AdminPanel() {
                               ))}
                             </div>
                           </div>
+                        </div>
+
+                        {/* Subheading (Topic) — scoped to this question's own Block + Module + Subject */}
+                        <div>
+                          <label className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                            <ListTree size={13} /> Subheading
+                          </label>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input
+                              type="text"
+                              value={editSelectedTopic ? editSelectedTopic.name : editNewTopicName}
+                              onChange={(e) => {
+                                setEditSelectedTopicId("");
+                                setEditNewTopicName(e.target.value);
+                              }}
+                              onKeyDown={(e) => e.key === "Enter" && handleCreateEditTopic(qItem)}
+                              placeholder="Type a subheading, e.g. Coronary Circulation"
+                              className="flex-1 min-w-[200px] rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                              style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                            />
+                            {editSelectedTopic ? (
+                              <button
+                                onClick={() => {
+                                  setEditSelectedTopicId("");
+                                  setEditNewTopicName("");
+                                }}
+                                className="flex items-center gap-1 rounded-xl px-3 py-2.5 text-xs font-bold transition-all"
+                                style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.textMuted }}
+                              >
+                                <X size={13} /> Clear
+                              </button>
+                            ) : (
+                              <Btn
+                                t={t}
+                                variant="secondary"
+                                disabled={!editNewTopicName.trim() || editCreatingTopic}
+                                onClick={() => handleCreateEditTopic(qItem)}
+                              >
+                                {editCreatingTopic ? "Adding\u2026" : "Add"}
+                              </Btn>
+                            )}
+                          </div>
+
+                          {/* Previously used subheadings in this scope, for quick reuse or removal */}
+                          {editTopicsLoading ? (
+                            <div className="mt-3 flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
+                              <Loader2 size={13} className="animate-spin" /> Loading subheadings&hellip;
+                            </div>
+                          ) : (
+                            editTopics.length > 0 && (
+                              <div className="mt-3 flex flex-wrap gap-1.5">
+                                {editTopics.map((s) => (
+                                  <Pill
+                                    key={s.id}
+                                    t={t}
+                                    tone="teal"
+                                    active={editSelectedTopicId === s.id}
+                                    onClick={() => {
+                                      setEditSelectedTopicId(s.id);
+                                      setEditNewTopicName("");
+                                    }}
+                                  >
+                                    {s.name}
+                                    <X
+                                      size={11}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteEditTopic(qItem, s);
+                                      }}
+                                    />
+                                  </Pill>
+                                ))}
+                              </div>
+                            )
+                          )}
                         </div>
 
                         <div>
