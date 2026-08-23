@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ActiveSetRef, AnswerRecord, PracticeConfig, UserProfile } from "../types";
+import { FREE_BLOCK } from "../data/subjects";
 
 export interface QuizSession {
   setRef: ActiveSetRef;
@@ -138,4 +139,21 @@ export const useIsPremium = () =>
       return s.profile.premiumExpiry > Date.now();
     }
     return false;
+  });
+
+/**
+ * Whether the signed-in user can access a specific Block: true for the free
+ * block, for admins, for anyone with an active premium subscription, or when
+ * an admin has manually granted this exact block via `unlockedBlocks` on the
+ * "Manage Access" admin tab (e.g. a student given just Block 4 without going
+ * fully premium).
+ */
+export const useIsBlockUnlocked = (block: number) =>
+  useAppStore((s) => {
+    if (block === FREE_BLOCK) return true;
+    if (s.isAdmin) return true;
+    if (s.profile?.premium) {
+      if (!s.profile.premiumExpiry || s.profile.premiumExpiry > Date.now()) return true;
+    }
+    return !!s.profile?.unlockedBlocks?.includes(block);
   });

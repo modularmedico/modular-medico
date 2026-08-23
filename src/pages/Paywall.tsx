@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Crown, Check, Sparkles, ArrowRight, ShieldCheck } from "lucide-react";
+import { Crown, Check, MessageCircle, ArrowRight, ShieldCheck } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
@@ -14,12 +14,17 @@ const PERKS = [
   "Streaks, daily goals & weak-topic accuracy heatmap",
 ];
 
+// Admin's WhatsApp number for handling purchases/upgrades manually — every
+// "Subscribe" / "Unlock" action on this page hands off to a WhatsApp chat
+// with this number instead of taking payment in-app.
+const PURCHASE_WHATSAPP_NUMBER = "923187561879"; // +92 318 7561879, no punctuation for wa.me
+
 export default function Paywall() {
   const navigate = useNavigate();
   const isDark = useAppStore((s) => s.isDark);
   const uid = useAppStore((s) => s.uid);
+  const email = useAppStore((s) => s.email);
   const isAdmin = useAppStore((s) => s.isAdmin);
-  const unlockFreePremium = useAppStore((s) => s.unlockFreePremium);
   const isPremium = useIsPremium();
   const t = isDark ? THEME.dark : THEME.light;
 
@@ -90,9 +95,12 @@ export default function Paywall() {
   }
 
   const handleActivateSubscription = () => {
-    // Integrate payment logic here, for now it mocks success
-    unlockFreePremium();
-    navigate("/subjects");
+    const messageLines = [
+      "Hi! I'd like to subscribe to Modular Medico's Full MBBS Access (PKR 1500/year).",
+      email ? `My account email: ${email}` : null,
+    ].filter(Boolean);
+    const waUrl = `https://wa.me/${PURCHASE_WHATSAPP_NUMBER}?text=${encodeURIComponent(messageLines.join("\n"))}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -101,7 +109,7 @@ export default function Paywall() {
         <Crown size={32} color={t.gold} className="mx-auto mb-2" />
         <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 26 }}>Full MBBS Access</h1>
         <p style={{ color: t.textMuted, fontSize: 14, marginTop: 4 }}>
-          Subscribe securely to unlock all premium content.
+          Message us on WhatsApp to subscribe and unlock all premium content.
         </p>
       </div>
 
@@ -120,8 +128,8 @@ export default function Paywall() {
       </Card>
 
       <div className="flex flex-col gap-3">
-        <Btn t={t} full icon={Sparkles} onClick={handleActivateSubscription}>
-          Subscribe Now
+        <Btn t={t} full icon={MessageCircle} onClick={handleActivateSubscription} style={{ backgroundColor: "#25D366", color: "#04241a", border: "1.5px solid #25D366" }}>
+          Subscribe via WhatsApp
         </Btn>
         <Btn t={t} full variant="ghost" onClick={() => navigate("/subjects")}>
           Return to Subjects
@@ -129,7 +137,7 @@ export default function Paywall() {
       </div>
 
       <p className="text-center text-xs" style={{ color: t.textFaint }}>
-        Payments are processed securely.
+        You'll be redirected to WhatsApp ({"+92 318 7561879"}) to complete your subscription.
       </p>
     </div>
   );

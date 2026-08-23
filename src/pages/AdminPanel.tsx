@@ -28,6 +28,10 @@ import {
   Library,
   Pencil,
   Save,
+  Users,
+  Crown,
+  GraduationCap,
+  FolderTree,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
@@ -40,6 +44,7 @@ import {
   SUBJECT_META,
   MASTER_MODULES,
   TOTAL_BLOCKS,
+  FREE_BLOCK,
   type SubjectId,
 } from "../data/subjects";
 import {
@@ -56,6 +61,9 @@ import {
   subscribeSubheadings,
   createSubheading,
   deleteSubheading,
+  subscribeAllUsers,
+  setUserUnlockedBlocks,
+  setUserPremium,
   QuestionSaveError,
 } from "../services/adminContent";
 import {
@@ -71,16 +79,25 @@ import {
   deleteOspeBook,
   subscribeAllOspeBooks,
 } from "../services/ospeBooks";
+import {
+  addStudyNote,
+  updateStudyNoteStatus,
+  deleteStudyNote,
+  subscribeAllStudyNotes,
+} from "../services/studyNotes";
 import { parseBracketFormat } from "../utils/parseBracketFormat";
-import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc } from "../types";
+import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreStudyNote, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 
 const ADMIN_TABS = [
   { id: "add_mcq", label: "Add MCQs", icon: PlusCircle },
   { id: "manage_mcq", label: "Manage MCQs & Bank", icon: Search },
   { id: "add_lecture", label: "Add Lecture", icon: Video },
   { id: "manage_lecture", label: "Manage Lectures", icon: Youtube },
-  { id: "add_ospe_book", label: "Add OSPE Book", icon: BookMarked },
-  { id: "manage_ospe_book", label: "Manage OSPE Books", icon: Library },
+  { id: "add_ospe_book", label: "Add OSPE Material", icon: BookMarked },
+  { id: "manage_ospe_book", label: "Manage OSPE Material", icon: Library },
+  { id: "add_study_notes", label: "Add Study Notes", icon: GraduationCap },
+  { id: "manage_study_notes", label: "Manage Study Notes", icon: FolderTree },
+  { id: "manage_access", label: "Manage Access", icon: Users },
 ] as const;
 
 type AdminTab = typeof ADMIN_TABS[number]["id"];
@@ -101,6 +118,71 @@ export default function AdminPanel() {
   const t = isDark ? THEME.dark : THEME.light;
 
   const [activeTab, setActiveTab] = useState<AdminTab>("add_mcq");
+
+  // Manage Access — every registered account, for the per-user Block unlock
+  // grid. Separate from allQuestions' admin-scoped subscription below.
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [accessSearchQuery, setAccessSearchQuery] = useState("");
+  // uid -> in-flight save, so each account's checkbox grid can save
+  // independently without disabling the whole list.
+  const [accessSaving, setAccessSaving] = useState<Record<string, boolean>>({});
+  const [accessNotice, setAccessNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== "manage_access") return;
+    setLoadingUsers(true);
+    const unsub = subscribeAllUsers((users) => {
+      setAllUsers(users);
+      setLoadingUsers(false);
+    });
+    return unsub;
+  }, [activeTab]);
+
+  const filteredUsers = useMemo(() => {
+    const query = accessSearchQuery.trim().toLowerCase();
+    if (!query) return allUsers;
+    return allUsers.filter(
+      (u) => u.email?.toLowerCase().includes(query) || u.displayName?.toLowerCase().includes(query)
+    );
+  }, [allUsers, accessSearchQuery]);
+
+  // Toggle one Block for one account. Optimistically updates the local list
+  // so the checkbox flips immediately, then writes the full next array —
+  // setUserUnlockedBlocks always overwrites the whole list, it's not a delta.
+  const handleToggleUserBlock = async (u: UserProfile, block: number) => {
+    const current = u.unlockedBlocks || [];
+    const next = current.includes(block) ? current.filter((b) => b !== block) : [...current, block];
+    setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, unlockedBlocks: next } : x)));
+    setAccessSaving((s) => ({ ...s, [u.uid]: true }));
+    try {
+      await setUserUnlockedBlocks(u.uid, next);
+    } catch {
+      // Revert on failure so the UI never claims a save that didn't happen.
+      setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, unlockedBlocks: current } : x)));
+      setAccessNotice(`Failed to update access for ${u.email || u.uid}.`);
+      setTimeout(() => setAccessNotice(null), 3500);
+    } finally {
+      setAccessSaving((s) => ({ ...s, [u.uid]: false }));
+    }
+  };
+
+  const handleToggleUserPremium = async (u: UserProfile) => {
+    const next = !u.premium;
+    setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, premium: next, premiumExpiry: null } : x)));
+    setAccessSaving((s) => ({ ...s, [u.uid]: true }));
+    try {
+      await setUserPremium(u.uid, next);
+      setAccessNotice(`${u.email || u.uid} is now ${next ? "premium" : "not premium"}.`);
+      setTimeout(() => setAccessNotice(null), 2500);
+    } catch {
+      setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, premium: u.premium, premiumExpiry: u.premiumExpiry } : x)));
+      setAccessNotice(`Failed to update premium status for ${u.email || u.uid}.`);
+      setTimeout(() => setAccessNotice(null), 3500);
+    } finally {
+      setAccessSaving((s) => ({ ...s, [u.uid]: false }));
+    }
+  };
 
   // Questions state for management
   const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);
@@ -482,10 +564,10 @@ export default function AdminPanel() {
   const handleDeleteOspeBook = async (b: FirestoreOspeBook) => {
     try {
       await deleteOspeBook(b.id);
-      setActionNotice(`Removed OSPE Book: "${b.title.slice(0, 40)}"`);
+      setActionNotice(`Removed OSPE Material: "${b.title.slice(0, 40)}"`);
       setTimeout(() => setActionNotice(null), 3500);
     } catch {
-      setActionNotice("Failed to delete OSPE Book.");
+      setActionNotice("Failed to delete OSPE Material.");
       setTimeout(() => setActionNotice(null), 3000);
     }
   };
@@ -494,10 +576,10 @@ export default function AdminPanel() {
     const nextStatus: QuestionStatus = b.status === "published" ? "draft" : "published";
     try {
       await updateOspeBookStatus(b.id, nextStatus);
-      setActionNotice(`OSPE Book status set to ${nextStatus}.`);
+      setActionNotice(`OSPE Material status set to ${nextStatus}.`);
       setTimeout(() => setActionNotice(null), 2500);
     } catch {
-      setActionNotice("Failed to update OSPE Book status.");
+      setActionNotice("Failed to update OSPE Material status.");
       setTimeout(() => setActionNotice(null), 2500);
     }
   };
@@ -521,6 +603,126 @@ export default function AdminPanel() {
       })
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }, [ospeBooks, ospeFilterSubject, ospeFilterStatus, ospeSearchQuery]);
+
+  /* ------------------------------------------------------------------------- */
+  /* BOOKS & STUDY NOTES STATE (Block -> Module -> Subject scoped, like        */
+  /* Lectures — a Google Drive link per book/note)                            */
+  /* ------------------------------------------------------------------------- */
+  const [studyNotes, setStudyNotes] = useState<FirestoreStudyNote[]>([]);
+  const [loadingStudyNotes, setLoadingStudyNotes] = useState(true);
+  const [studyNotesBankWarning, setStudyNotesBankWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadingStudyNotes(true);
+    const unsub = subscribeAllStudyNotes(
+      (notes) => {
+        setStudyNotes(notes);
+        setLoadingStudyNotes(false);
+      },
+      (_reason, message) => setStudyNotesBankWarning(message)
+    );
+    return () => unsub();
+  }, []);
+
+  const [studyNoteBlock, setStudyNoteBlock] = useState<number>(1);
+  const [isCustomStudyNoteBlock, setIsCustomStudyNoteBlock] = useState(false);
+  const [customStudyNoteBlockInput, setCustomStudyNoteBlockInput] = useState("1");
+  const [studyNoteModulePreset, setStudyNoteModulePreset] = useState<string>(MASTER_MODULES[0]?.name || "Foundation-I");
+  const [isCustomStudyNoteModule, setIsCustomStudyNoteModule] = useState(false);
+  const [customStudyNoteModuleName, setCustomStudyNoteModuleName] = useState("");
+  const [studyNoteSubjectId, setStudyNoteSubjectId] = useState<SubjectId>("gross_anatomy");
+  const [studyNoteTitle, setStudyNoteTitle] = useState("");
+  const [studyNoteDriveUrl, setStudyNoteDriveUrl] = useState("");
+  const [studyNoteDescription, setStudyNoteDescription] = useState("");
+  const [studyNotePublishImmediately, setStudyNotePublishImmediately] = useState(true);
+  const [studyNoteSaveStatus, setStudyNoteSaveStatus] = useState<"success" | "success-local" | "error" | null>(null);
+  const [studyNoteSaveWarning, setStudyNoteSaveWarning] = useState<string | null>(null);
+
+  const effectiveStudyNoteBlock = isCustomStudyNoteBlock ? parseInt(customStudyNoteBlockInput, 10) || 1 : studyNoteBlock;
+  const effectiveStudyNoteModuleName = isCustomStudyNoteModule
+    ? customStudyNoteModuleName.trim() || "General Module"
+    : studyNoteModulePreset;
+  const effectiveStudyNoteModuleId = effectiveStudyNoteModuleName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+  const isStudyNoteValid = studyNoteTitle.trim().length > 0 && studyNoteDriveUrl.trim().length > 0;
+
+  const handleSaveStudyNote = async () => {
+    if (!isStudyNoteValid) return;
+    try {
+      const result = await addStudyNote({
+        title: studyNoteTitle.trim(),
+        driveUrl: studyNoteDriveUrl.trim(),
+        description: studyNoteDescription.trim(),
+        subjectId: studyNoteSubjectId,
+        moduleId: effectiveStudyNoteModuleId,
+        moduleName: effectiveStudyNoteModuleName,
+        block: effectiveStudyNoteBlock,
+        status: (studyNotePublishImmediately ? "published" : "draft") as QuestionStatus,
+      });
+      if (result.source === "firestore") {
+        setStudyNoteSaveStatus("success");
+        setStudyNoteSaveWarning(null);
+        setTimeout(() => setStudyNoteSaveStatus(null), 3000);
+      } else {
+        setStudyNoteSaveStatus("success-local");
+        setStudyNoteSaveWarning(result.message);
+        setTimeout(() => setStudyNoteSaveStatus(null), 9000);
+      }
+      setStudyNoteTitle("");
+      setStudyNoteDriveUrl("");
+      setStudyNoteDescription("");
+    } catch {
+      setStudyNoteSaveStatus("error");
+      setStudyNoteSaveWarning(null);
+      setTimeout(() => setStudyNoteSaveStatus(null), 4000);
+    }
+  };
+
+  const handleDeleteStudyNote = async (n: FirestoreStudyNote) => {
+    try {
+      await deleteStudyNote(n.id);
+      setActionNotice(`Removed Study Note: "${n.title.slice(0, 40)}"`);
+      setTimeout(() => setActionNotice(null), 3500);
+    } catch {
+      setActionNotice("Failed to delete Study Note.");
+      setTimeout(() => setActionNotice(null), 3000);
+    }
+  };
+
+  const handleToggleStudyNoteStatus = async (n: FirestoreStudyNote) => {
+    const nextStatus: QuestionStatus = n.status === "published" ? "draft" : "published";
+    try {
+      await updateStudyNoteStatus(n.id, nextStatus);
+      setActionNotice(`Study Note status set to ${nextStatus}.`);
+      setTimeout(() => setActionNotice(null), 2500);
+    } catch {
+      setActionNotice("Failed to update Study Note status.");
+      setTimeout(() => setActionNotice(null), 2500);
+    }
+  };
+
+  const [studyNoteFilterBlock, setStudyNoteFilterBlock] = useState<string>("all");
+  const [studyNoteFilterSubject, setStudyNoteFilterSubject] = useState<string>("all");
+  const [studyNoteFilterStatus, setStudyNoteFilterStatus] = useState<string>("all");
+  const [studyNoteSearchQuery, setStudyNoteSearchQuery] = useState("");
+
+  const filteredStudyNotes = useMemo(() => {
+    return studyNotes
+      .filter((n) => {
+        if (studyNoteFilterBlock !== "all" && n.block !== Number(studyNoteFilterBlock)) return false;
+        if (studyNoteFilterSubject !== "all" && n.subjectId !== studyNoteFilterSubject) return false;
+        if (studyNoteFilterStatus !== "all" && n.status !== studyNoteFilterStatus) return false;
+        if (studyNoteSearchQuery.trim()) {
+          const query = studyNoteSearchQuery.toLowerCase();
+          const inTitle = n.title.toLowerCase().includes(query);
+          const inDesc = n.description?.toLowerCase().includes(query);
+          const inMod = n.moduleName?.toLowerCase().includes(query);
+          if (!inTitle && !inDesc && !inMod) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [studyNotes, studyNoteFilterBlock, studyNoteFilterSubject, studyNoteFilterStatus, studyNoteSearchQuery]);
 
   const effectiveBlock = isCustomBlock ? parseInt(customBlockInput, 10) || 1 : selectedBlock;
   const effectiveModuleName = isCustomModule
@@ -954,6 +1156,14 @@ export default function AdminPanel() {
                   style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
                 >
                   {ospeBooks.length}
+                </span>
+              )}
+              {tab.id === "manage_study_notes" && (
+                <span
+                  className="rounded-full px-2 py-0.2 text-[11px] font-mono font-bold"
+                  style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
+                >
+                  {studyNotes.length}
                 </span>
               )}
             </button>
@@ -2514,14 +2724,14 @@ export default function AdminPanel() {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 5: ADD OSPE BOOK                                                  */}
+      {/* TAB 5: ADD OSPE MATERIAL                                                  */}
       {/* ===================================================================== */}
       {activeTab === "add_ospe_book" && (
         <div className="flex flex-col gap-6">
           <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
             <div className="flex items-center gap-2 border-b pb-3 mb-4" style={{ borderColor: t.border }}>
               <BookMarked size={17} color={t.purple} />
-              <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>OSPE Book Details</span>
+              <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>OSPE Material Details</span>
             </div>
 
             <div className="flex flex-col gap-4">
@@ -2600,7 +2810,7 @@ export default function AdminPanel() {
 
               {ospeSaveStatus === "success" && (
                 <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.green}20`, color: t.green }}>
-                  <CheckCircle2 size={16} /> OSPE Book saved to Firestore!
+                  <CheckCircle2 size={16} /> OSPE Material saved to Firestore!
                 </div>
               )}
               {ospeSaveStatus === "success-local" && (
@@ -2611,12 +2821,12 @@ export default function AdminPanel() {
               )}
               {ospeSaveStatus === "error" && (
                 <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.red}20`, color: t.red }}>
-                  <XCircle size={16} /> Failed to save OSPE Book. Try again.
+                  <XCircle size={16} /> Failed to save OSPE Material. Try again.
                 </div>
               )}
 
               <Btn t={t} disabled={!isOspeValid} onClick={handleSaveOspeBook}>
-                Save OSPE Book
+                Save OSPE Material
               </Btn>
             </div>
           </Card>
@@ -2624,7 +2834,7 @@ export default function AdminPanel() {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 6: MANAGE OSPE BOOKS                                              */}
+      {/* TAB 6: MANAGE OSPE MATERIAL                                              */}
       {/* ===================================================================== */}
       {activeTab === "manage_ospe_book" && (
         <div className="flex flex-col gap-5">
@@ -2643,7 +2853,7 @@ export default function AdminPanel() {
                   type="text"
                   value={ospeSearchQuery}
                   onChange={(e) => setOspeSearchQuery(e.target.value)}
-                  placeholder="Search OSPE Books by title or description..."
+                  placeholder="Search OSPE Material by title or description..."
                   className="w-full rounded-xl py-2.5 pl-9 pr-3 text-sm font-semibold outline-none"
                   style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
                 />
@@ -2676,7 +2886,7 @@ export default function AdminPanel() {
 
           {loadingOspeBooks ? (
             <div className="flex items-center justify-center py-16">
-              <Spinner t={t} size={22} label="Loading OSPE Books\u2026" />
+              <Spinner t={t} size={22} label="Loading OSPE Material\u2026" />
             </div>
           ) : filteredOspeBooks.length === 0 ? (
             <div
@@ -2684,7 +2894,7 @@ export default function AdminPanel() {
               style={{ backgroundColor: t.surfaceAlt, border: `1.5px dashed ${t.border}` }}
             >
               <Library size={22} color={t.textFaint} />
-              <p className="text-sm font-semibold" style={{ color: t.textMuted }}>No OSPE Books match these filters.</p>
+              <p className="text-sm font-semibold" style={{ color: t.textMuted }}>No OSPE Material matches these filters.</p>
             </div>
           ) : (
             <div className="flex flex-col gap-3">
@@ -2735,13 +2945,495 @@ export default function AdminPanel() {
                       onClick={() => handleDeleteOspeBook(b)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl"
                       style={{ backgroundColor: `${t.red}15`, border: `1.5px solid ${t.red}40` }}
-                      title="Delete OSPE Book"
+                      title="Delete OSPE Material"
                     >
                       <Trash2 size={15} color={t.red} />
                     </button>
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 7: ADD STUDY NOTES (Block -> Module -> Subject scoped)            */}
+      {/* ===================================================================== */}
+      {activeTab === "add_study_notes" && (
+        <div className="flex flex-col gap-6">
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-center justify-between border-b pb-3 mb-4" style={{ borderColor: t.border }}>
+              <div className="flex items-center gap-2">
+                <Layers size={17} color={t.purple} />
+                <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
+                  Target Assignment (Combine Any Block with Any Module)
+                </span>
+              </div>
+              <span className="text-xs" style={{ color: t.textFaint }}>
+                Study Notes follow the same Block &rarr; Module &rarr; Subject scaffold as MCQs &amp; Lectures
+              </span>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {/* 1. Block Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Target Block
+                </label>
+                {!isCustomStudyNoteBlock ? (
+                  <select
+                    value={studyNoteBlock}
+                    onChange={(e) => setStudyNoteBlock(Number(e.target.value))}
+                    className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  >
+                    {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1).map((b) => (
+                      <option key={b} value={b} style={{ backgroundColor: t.surface, color: t.text }}>
+                        Block {b}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="number"
+                    min="1"
+                    max="99"
+                    value={customStudyNoteBlockInput}
+                    onChange={(e) => setCustomStudyNoteBlockInput(e.target.value)}
+                    placeholder="Enter Block #"
+                    className="w-full rounded-xl px-3 py-2 text-sm font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  />
+                )}
+                <button
+                  onClick={() => setIsCustomStudyNoteBlock(!isCustomStudyNoteBlock)}
+                  className="mt-1 text-[11px] font-bold underline"
+                  style={{ color: t.teal }}
+                >
+                  {isCustomStudyNoteBlock ? "Choose from standard 1–15" : "+ Custom Block #"}
+                </button>
+              </div>
+
+              {/* 2. Module Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Target Module
+                </label>
+                {!isCustomStudyNoteModule ? (
+                  <select
+                    value={studyNoteModulePreset}
+                    onChange={(e) => setStudyNoteModulePreset(e.target.value)}
+                    className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  >
+                    {MASTER_MODULES.map((m) => (
+                      <option key={m.id} value={m.name} style={{ backgroundColor: t.surface, color: t.text }}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={customStudyNoteModuleName}
+                    onChange={(e) => setCustomStudyNoteModuleName(e.target.value)}
+                    placeholder="e.g. Cardiovascular-I"
+                    className="w-full rounded-xl px-3 py-2 text-sm font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  />
+                )}
+                <button
+                  onClick={() => setIsCustomStudyNoteModule(!isCustomStudyNoteModule)}
+                  className="mt-1 text-[11px] font-bold underline"
+                  style={{ color: t.teal }}
+                >
+                  {isCustomStudyNoteModule ? "Choose from standard modules" : "+ Type Custom Module Name"}
+                </button>
+              </div>
+
+              {/* 3. Subject Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Discipline / Subject
+                </label>
+                <select
+                  value={studyNoteSubjectId}
+                  onChange={(e) => setStudyNoteSubjectId(e.target.value as SubjectId)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  {SUBJECT_LIST.map((s) => (
+                    <option key={s} value={s} style={{ backgroundColor: t.surface, color: t.text }}>
+                      {SUBJECT_META[s].label}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[11px]" style={{ color: t.textFaint }}>
+                  {SUBJECT_META[studyNoteSubjectId]?.defaultYear}
+                </span>
+              </div>
+            </div>
+
+            {/* Target Summary Pill */}
+            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt }}>
+              <span className="font-bold" style={{ color: t.textMuted }}>Adding to:</span>
+              <Pill t={t} tone="teal">Block {effectiveStudyNoteBlock}</Pill>
+              <Pill t={t} tone="purple">{effectiveStudyNoteModuleName}</Pill>
+              <Pill t={t} tone="gold">{SUBJECT_META[studyNoteSubjectId].label}</Pill>
+            </div>
+          </Card>
+
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-center gap-2 border-b pb-3 mb-4" style={{ borderColor: t.border }}>
+              <GraduationCap size={17} color={t.purple} />
+              <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>Study Note Details</span>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Title
+                </label>
+                <input
+                  type="text"
+                  value={studyNoteTitle}
+                  onChange={(e) => setStudyNoteTitle(e.target.value)}
+                  placeholder="e.g. Cardiovascular Physiology — High-Yield Notes"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Google Drive Link
+                </label>
+                <input
+                  type="text"
+                  value={studyNoteDriveUrl}
+                  onChange={(e) => setStudyNoteDriveUrl(e.target.value)}
+                  placeholder="https://drive.google.com/file/d/.../view?usp=sharing"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+                <span className="mt-1 block text-[11px]" style={{ color: t.textFaint }}>
+                  Set the file's sharing to "Anyone with the link" in Google Drive so students can open it.
+                </span>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Description (optional)
+                </label>
+                <textarea
+                  value={studyNoteDescription}
+                  onChange={(e) => setStudyNoteDescription(e.target.value)}
+                  placeholder="What this book/note covers..."
+                  rows={3}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm outline-none resize-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs font-bold cursor-pointer" style={{ color: t.textMuted }}>
+                <input
+                  type="checkbox"
+                  checked={studyNotePublishImmediately}
+                  onChange={(e) => setStudyNotePublishImmediately(e.target.checked)}
+                  className="accent-purple-500 rounded"
+                />
+                Publish immediately (Live)
+              </label>
+
+              {studyNoteSaveStatus === "success" && (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.green}20`, color: t.green }}>
+                  <CheckCircle2 size={16} /> Study Note saved to Firestore!
+                </div>
+              )}
+              {studyNoteSaveStatus === "success-local" && (
+                <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold" style={{ backgroundColor: `${t.gold}20`, color: t.gold }}>
+                  <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                  <span>{studyNoteSaveWarning}</span>
+                </div>
+              )}
+              {studyNoteSaveStatus === "error" && (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.red}20`, color: t.red }}>
+                  <XCircle size={16} /> Failed to save Study Note. Try again.
+                </div>
+              )}
+
+              <Btn t={t} disabled={!isStudyNoteValid} onClick={handleSaveStudyNote}>
+                Save Study Note
+              </Btn>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 8: MANAGE STUDY NOTES                                             */}
+      {/* ===================================================================== */}
+      {activeTab === "manage_study_notes" && (
+        <div className="flex flex-col gap-5">
+          {studyNotesBankWarning && (
+            <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold" style={{ backgroundColor: `${t.gold}20`, color: t.gold }}>
+              <AlertTriangle size={15} className="shrink-0 mt-0.5" /> <span>{studyNotesBankWarning}</span>
+            </div>
+          )}
+
+          {/* Filters */}
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex flex-col gap-3">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" color={t.textFaint} />
+                <input
+                  type="text"
+                  value={studyNoteSearchQuery}
+                  onChange={(e) => setStudyNoteSearchQuery(e.target.value)}
+                  placeholder="Search Study Notes by title, description, or module..."
+                  className="w-full rounded-xl py-2.5 pl-9 pr-3 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={studyNoteFilterBlock}
+                  onChange={(e) => setStudyNoteFilterBlock(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Blocks</option>
+                  {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1).map((b) => (
+                    <option key={b} value={b}>Block {b}</option>
+                  ))}
+                </select>
+                <select
+                  value={studyNoteFilterSubject}
+                  onChange={(e) => setStudyNoteFilterSubject(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Subjects</option>
+                  {SUBJECT_LIST.map((s) => (
+                    <option key={s} value={s}>{SUBJECT_META[s].label}</option>
+                  ))}
+                </select>
+                <select
+                  value={studyNoteFilterStatus}
+                  onChange={(e) => setStudyNoteFilterStatus(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="published">Published</option>
+                  <option value="draft">Draft</option>
+                </select>
+              </div>
+            </div>
+          </Card>
+
+          {loadingStudyNotes ? (
+            <div className="flex items-center justify-center py-16">
+              <Spinner t={t} size={22} label="Loading Study Notes\u2026" />
+            </div>
+          ) : filteredStudyNotes.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center gap-2 rounded-2xl p-10 text-center"
+              style={{ backgroundColor: t.surfaceAlt, border: `1.5px dashed ${t.border}` }}
+            >
+              <FolderTree size={22} color={t.textFaint} />
+              <p className="text-sm font-semibold" style={{ color: t.textMuted }}>No Study Notes match these filters.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {filteredStudyNotes.map((n) => (
+                <div
+                  key={n.id}
+                  className="flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                      <Pill t={t} tone="teal">Block {n.block}</Pill>
+                      <Pill t={t} tone="purple">{n.moduleName}</Pill>
+                      <Pill t={t} tone="gold">{SUBJECT_META[n.subjectId as SubjectId]?.label || n.subjectId}</Pill>
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                        style={{
+                          backgroundColor: n.status === "published" ? `${t.green}20` : `${t.textFaint}20`,
+                          color: n.status === "published" ? t.green : t.textFaint,
+                        }}
+                      >
+                        {n.status === "published" ? "Published" : "Draft"}
+                      </span>
+                    </div>
+                    <h4 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>{n.title}</h4>
+                    {n.description && (
+                      <p className="mt-0.5 text-xs" style={{ color: t.textMuted }}>{n.description}</p>
+                    )}
+                    <a
+                      href={n.driveUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 flex w-fit items-center gap-1 text-[11px] font-bold hover:opacity-80"
+                      style={{ color: t.teal }}
+                    >
+                      Open in Google Drive <ExternalLink size={11} />
+                    </a>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      onClick={() => handleToggleStudyNoteStatus(n)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl"
+                      style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+                      title={n.status === "published" ? "Unpublish" : "Publish"}
+                    >
+                      {n.status === "published" ? <EyeOff size={15} color={t.textMuted} /> : <Eye size={15} color={t.green} />}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteStudyNote(n)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl"
+                      style={{ backgroundColor: `${t.red}15`, border: `1.5px solid ${t.red}40` }}
+                      title="Delete Study Note"
+                    >
+                      <Trash2 size={15} color={t.red} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB: MANAGE ACCESS — per-account Block unlocks                        */}
+      {/* ===================================================================== */}
+      {activeTab === "manage_access" && (
+        <div className="flex flex-col gap-5">
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-start gap-3">
+              <Users size={18} color={t.purple} className="mt-0.5 shrink-0" />
+              <div>
+                <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
+                  Every Registered Account
+                </h2>
+                <p className="mt-1 text-xs" style={{ color: t.textMuted }}>
+                  Grant a student access to specific Blocks without making their whole account
+                  premium, or toggle full Premium (all Blocks 1&ndash;{TOTAL_BLOCKS}) directly.
+                  Block {FREE_BLOCK} is always free for everyone and isn&rsquo;t shown here.
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          {accessNotice && (
+            <div
+              className="rounded-xl px-4 py-2.5 text-xs font-semibold"
+              style={{ backgroundColor: `${t.purple}15`, color: isDark ? "#c4b5fd" : t.purpleStrong }}
+            >
+              {accessNotice}
+            </div>
+          )}
+
+          {/* Search */}
+          <div className="relative">
+            <Search size={15} color={t.textFaint} className="absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={accessSearchQuery}
+              onChange={(e) => setAccessSearchQuery(e.target.value)}
+              placeholder="Search accounts by name or email..."
+              className="w-full rounded-xl py-2.5 pl-10 pr-4 text-sm outline-none"
+              style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+            />
+          </div>
+
+          {loadingUsers ? (
+            <div className="py-16 text-center">
+              <Spinner t={t} size={24} label="Loading accounts\u2026" />
+            </div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="rounded-2xl p-12 text-center flex flex-col items-center gap-3" style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+              <Users size={32} color={t.textFaint} />
+              <p style={{ color: t.textMuted, fontSize: 15 }}>
+                {allUsers.length === 0
+                  ? "No accounts loaded. If you're signed in as an admin, this should populate automatically — otherwise your account may be missing the real Firestore admin claim (see scripts/setAdminClaim.mjs)."
+                  : "No accounts matched your search."}
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {filteredUsers.map((u) => {
+                const isSaving = !!accessSaving[u.uid];
+                const unlockedSet = new Set(u.unlockedBlocks || []);
+                const isUserPremiumActive = u.premium && (!u.premiumExpiry || u.premiumExpiry > Date.now());
+
+                return (
+                  <div
+                    key={u.uid}
+                    className="rounded-2xl p-4 flex flex-col gap-3"
+                    style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 14.5 }}>
+                            {u.displayName || "Student"}
+                          </span>
+                          {isSaving && <Loader2 size={12} className="animate-spin" color={t.textFaint} />}
+                        </div>
+                        <span className="text-xs" style={{ color: t.textMuted }}>{u.email || u.uid}</span>
+                      </div>
+
+                      <button
+                        onClick={() => handleToggleUserPremium(u)}
+                        disabled={isSaving}
+                        className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold transition-all disabled:opacity-50"
+                        style={{
+                          backgroundColor: isUserPremiumActive ? `${t.gold}22` : t.surfaceAlt,
+                          border: `1.5px solid ${isUserPremiumActive ? t.gold : t.border}`,
+                          color: isUserPremiumActive ? t.goldDeep : t.textMuted,
+                        }}
+                        title="Click to toggle full Premium access for this account"
+                      >
+                        <Crown size={12} /> {isUserPremiumActive ? "Premium" : "Not Premium"}
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                        Manually Unlocked Blocks
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1)
+                          .filter((b) => b !== FREE_BLOCK)
+                          .map((b) => {
+                            const on = unlockedSet.has(b);
+                            return (
+                              <button
+                                key={b}
+                                onClick={() => handleToggleUserBlock(u, b)}
+                                disabled={isSaving}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-extrabold transition-all disabled:opacity-40"
+                                style={{
+                                  backgroundColor: on ? t.purpleStrong : t.surfaceAlt,
+                                  color: on ? "#fff" : t.textMuted,
+                                  border: `1.5px solid ${on ? t.purpleStrong : t.border}`,
+                                }}
+                                title={`Block ${b}${on ? " (unlocked for this account)" : ""}`}
+                              >
+                                {b}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

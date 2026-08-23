@@ -19,8 +19,8 @@ import Btn from "../components/Btn";
 import Segmented from "../components/Segmented";
 import Toggle from "../components/Toggle";
 import { THEME, FONT_DISPLAY } from "../theme";
-import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
-import { SUBJECT_META, isSubjectId, DEFAULT_BLOCK_DEFINITIONS, FREE_BLOCK, type BlockDefinition } from "../data/subjects";
+import { useAppStore, useIsLoggedIn, useIsBlockUnlocked } from "../store/useAppStore";
+import { SUBJECT_META, isSubjectId, DEFAULT_BLOCK_DEFINITIONS, type BlockDefinition } from "../data/subjects";
 import {
   subscribeBlockDefinitions,
   subscribeTopics,
@@ -50,7 +50,6 @@ export default function PracticeSetup() {
   const isDark = useAppStore((s) => s.isDark);
   const startSession = useAppStore((s) => s.startSession);
   const isLoggedIn = useIsLoggedIn();
-  const isPremium = useIsPremium();
   const t = isDark ? THEME.dark : THEME.light;
 
   const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
@@ -214,7 +213,7 @@ export default function PracticeSetup() {
     ? `${targetModule?.name || moduleId}`
     : `${SUBJECT_META[subjectId as keyof typeof SUBJECT_META]?.label || subjectId} \u00b7 ${targetModule?.name || `Block ${block}`}`;
 
-  const locked = block !== FREE_BLOCK && !isPremium;
+  const locked = !useIsBlockUnlocked(block);
 
   const selectedTopic = selectedTopicName
     ? topics.find((s) => s.name === selectedTopicName) || null

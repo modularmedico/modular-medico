@@ -121,6 +121,27 @@ export interface FirestoreOspeBook {
   createdAt?: number;
 }
 
+/**
+ * A single Study Note document as stored in the Firestore `study_notes`
+ * collection ("Books & Study Notes" — the student-facing library separate
+ * from OSPE Material). Unlike OSPE Material (Subject-only), each Study Note
+ * is scoped to the full Block -> Module -> Subject hierarchy, matching how
+ * MCQs and Lectures are organized.
+ */
+export interface FirestoreStudyNote {
+  id: string;
+  title: string;
+  driveUrl: string;
+  description?: string;
+  subjectId: string;
+  moduleId: string;
+  moduleName: string;
+  block: number;
+  status: QuestionStatus; // reuse "draft" | "published"
+  order?: number;
+  createdAt?: number;
+}
+
 export interface AnswerRecord {
   selected: number | null;
   correct: boolean;
@@ -158,6 +179,16 @@ export interface UserProfile {
   premium: boolean;
   premiumExpiry: number | null;
   isAdmin?: boolean;
+  /**
+   * Per-account Block access override, set only by an admin from the "Manage
+   * Access" admin tab. Block numbers listed here (1..15) are unlocked for this
+   * user regardless of `premium` — lets an admin grant a specific student
+   * access to, say, Block 4 and Block 7 only, without making their whole
+   * account premium. `null`/absent means no manual override: access still
+   * follows the normal FREE_BLOCK + premium rule. This is additive only — it
+   * can never lock a block that premium/FREE_BLOCK already unlocks.
+   */
+  unlockedBlocks?: number[] | null;
 }
 
 export interface AttemptRecord {

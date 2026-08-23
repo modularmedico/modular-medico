@@ -7,13 +7,14 @@ import {
   onSnapshot,
   query,
   where,
+  orderBy,
   getDocs,
   writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { DEFAULT_MODULES, DEFAULT_QUESTIONS } from "../data/defaultCurriculum";
 import { DEFAULT_BLOCK_DEFINITIONS, type BlockDefinition } from "../data/subjects";
-import type { Difficulty, FirestoreQuestion, ModuleDoc, QuestionStatus, SubheadingDoc, TopicDoc } from "../types";
+import type { Difficulty, FirestoreQuestion, ModuleDoc, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 
 const LOCAL_MODULES_KEY = "modular_medico_custom_modules";
 const LOCAL_BLOCKS_KEY = "modular_medico_custom_blocks";
@@ -1298,3 +1299,49 @@ export async function searchGlobalQuestions(queryText: string): Promise<Firestor
     return [];
   }
 }
+
+/* --------------------------- Account Access (Manage Access tab) ---------------------------- */
+
+/**
+ * Live view of every registered user's profile, for the admin "Manage Access"
+ * tab — lists every account so an admin can see and edit their per-Block
+ * unlock overrides. Requires the real Firestore `admin` custom claim (see
+ * scripts/setAdminClaim.mjs); the `users` collection's security rule only
+ * grants `list` to admins, so this comes back empty (with a console warning,
+ * caught below) for anyone else.
+ */
+export function subscribeAllUsers(cb: (users: UserProfile[]) => void) {
+  const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
+  return onSnapshot(
+    q,
+    (snap) => {
+      cb(snap.docs.map((d) => ({ uid: d.id, ...(d.data() as Omit<UserProfile, "uid">) })));
+    },
+    (err) => {
+      console.warn("Firestore subscribeAllUsers failed:", err.message);
+      cb([]);
+    }
+  );
+}
+
+/**
+ * Overwrites which Blocks are manually unlocked for one account — the
+ * "Manage Access" tab calls this with the full next list every time a
+ * checkbox is toggled (not an add/remove delta), so this always reflects
+ * exactly what's checked in the UI. Passing an empty array clears every
+ * manual override (the account falls back to FREE_BLOCK + premium rules);
+ * this never touches the `premium` flag itself.
+ */
+export async function setUserUnlockedBlocks(uid: string, blocks: number[]) {
+  const sorted = Array.from(new Set(blocks)).sort((a, b) => a - b);
+  await updateDoc(doc(db, "users", uid), { unlockedBlocks: sorted });
+}
+
+/** Grants or revokes premium (the full 1–15 bundle) for one account from the admin panel. */
+export async function setUserPremium(uid: string, premium: boolean) {
+  await updateDoc(doc(db, "users", uid), {
+    premium,
+    premiumExpiry: null, // admin-granted premium doesn't expire; use setPremium() in firestore.ts for timed grants
+  });
+}
+

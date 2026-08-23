@@ -43,6 +43,10 @@ export default function Subjects() {
   const isDark = useAppStore((s) => s.isDark);
   const isLoggedIn = useIsLoggedIn();
   const isPremium = useIsPremium();
+  const isAdmin = useAppStore((s) => s.isAdmin);
+  const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
+  const isBlockUnlocked = (block: number) =>
+    block === FREE_BLOCK || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
   const t = isDark ? THEME.dark : THEME.light;
 
   const [selectedBlockNum, setSelectedBlockNum] = useState(1);
@@ -96,6 +100,7 @@ export default function Subjects() {
   }, [blockDefs, yearFilter]);
 
   const currentBlockDef = blockDefs.find((b) => b.block === selectedBlockNum) || DEFAULT_BLOCK_DEFINITIONS[0];
+  const currentBlockLocked = !isBlockUnlocked(currentBlockDef.block);
 
   // Only show modules that actually have published MCQs added by the admin for this block.
   // Nothing is pre-populated from the curriculum scaffold anymore — a module only appears
@@ -210,7 +215,7 @@ export default function Subjects() {
             {filteredBlockDefs.map((b) => {
               const totalInBlock = counts.blockCounts[b.block] || 0;
               const isSelected = selectedBlockNum === b.block;
-              const isLocked = b.block !== FREE_BLOCK && !isPremium;
+              const isLocked = !isBlockUnlocked(b.block);
 
               return (
                 <button
@@ -316,16 +321,16 @@ export default function Subjects() {
                 <Btn
                   t={t}
                   full
-                  icon={currentBlockDef.block !== FREE_BLOCK && !isPremium ? Lock : Play}
+                  icon={currentBlockLocked ? Lock : Play}
                   onClick={() =>
                     navigate(
-                      currentBlockDef.block !== FREE_BLOCK && !isPremium
+                      currentBlockLocked
                         ? (isLoggedIn ? "/paywall" : "/signup")
                         : `/subjects/all/all/${currentBlockDef.block}?fullBlock=true`
                     )
                   }
                 >
-                  {currentBlockDef.block !== FREE_BLOCK && !isPremium ? "Unlock Block" : `Start Block ${currentBlockDef.block} Exam`}
+                  {currentBlockLocked ? "Unlock Block" : `Start Block ${currentBlockDef.block} Exam`}
                 </Btn>
                 <span className="text-center text-[11px]" style={{ color: t.textFaint }}>
                   Full multi-module exam
@@ -414,19 +419,19 @@ export default function Subjects() {
                           <button
                             onClick={() =>
                               navigate(
-                                currentBlockDef.block !== FREE_BLOCK && !isPremium
+                                currentBlockLocked
                                   ? (isLoggedIn ? "/paywall" : "/signup")
                                   : `/subjects/all/${mod.id}/${currentBlockDef.block}`
                               )
                             }
                             className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all hover:scale-[1.02]"
                             style={{
-                              backgroundColor: currentBlockDef.block !== FREE_BLOCK && !isPremium ? t.gold : t.purpleStrong,
+                              backgroundColor: currentBlockLocked ? t.gold : t.purpleStrong,
                               color: "#fff",
                             }}
                           >
-                            {currentBlockDef.block !== FREE_BLOCK && !isPremium ? <Lock size={13} fill="#fff" /> : <Play size={13} fill="#fff" />}
-                            {currentBlockDef.block !== FREE_BLOCK && !isPremium ? "Unlock Module" : `Practice Module`}
+                            {currentBlockLocked ? <Lock size={13} fill="#fff" /> : <Play size={13} fill="#fff" />}
+                            {currentBlockLocked ? "Unlock Module" : `Practice Module`}
                           </button>
                         </div>
                       </div>
@@ -446,7 +451,7 @@ export default function Subjects() {
                                 key={subjId}
                                 onClick={() =>
                                   navigate(
-                                    currentBlockDef.block !== FREE_BLOCK && !isPremium
+                                    currentBlockLocked
                                       ? (isLoggedIn ? "/paywall" : "/signup")
                                       : `/subjects/${subjId}/${mod.id}/${currentBlockDef.block}`
                                   )
@@ -461,7 +466,7 @@ export default function Subjects() {
                                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl relative"
                                   style={{ backgroundColor: `${color}22` }}
                                 >
-                                  {currentBlockDef.block !== FREE_BLOCK && !isPremium && (
+                                  {currentBlockLocked && (
                                     <div
                                       className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full shadow-sm"
                                       style={{ backgroundColor: t.gold, color: "#241A08" }}

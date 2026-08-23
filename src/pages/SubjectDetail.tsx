@@ -29,6 +29,10 @@ export default function SubjectDetail() {
   const isDark = useAppStore((s) => s.isDark);
   const isLoggedIn = useIsLoggedIn();
   const isPremium = useIsPremium();
+  const isAdmin = useAppStore((s) => s.isAdmin);
+  const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
+  const isBlockUnlocked = (block: number) =>
+    block === FREE_BLOCK || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
   const t = isDark ? THEME.dark : THEME.light;
   const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
   const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);
@@ -85,7 +89,7 @@ export default function SubjectDetail() {
 
       const blockDef = blockDefs.find((b) => b.block === q.block);
       const count = counts.subjectInModuleCounts[`${q.block}-${modId}-${subjectId}`] || 0;
-      const locked = q.block !== FREE_BLOCK && !isPremium;
+      const locked = !isBlockUnlocked(q.block);
 
       moduleAppearances.push({
         block:

@@ -28,9 +28,15 @@ service cloud.firestore {
       allow create: if isOwner(uid)
         && request.resource.data.premium == false
         && request.resource.data.get('premiumExpiry', null) == null;
-      allow update: if isOwner(uid)
+      // Owners can update their own profile (streak, daily goal, etc.) but
+      // may never change their own premium/premiumExpiry/unlockedBlocks —
+      // those are only ever written by the payment Cloud Functions or by an
+      // admin from the "Manage Access" admin tab (bypasses these three
+      // fields' owner restriction below).
+      allow update: if isAdmin() || (isOwner(uid)
         && request.resource.data.premium == resource.data.premium
-        && request.resource.data.premiumExpiry == resource.data.premiumExpiry;
+        && request.resource.data.premiumExpiry == resource.data.premiumExpiry
+        && request.resource.data.get('unlockedBlocks', null) == resource.data.get('unlockedBlocks', null));
       allow delete: if false;
 
       match /attempts/{attemptId} {

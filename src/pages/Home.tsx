@@ -18,6 +18,10 @@ import {
   Clock,
   ShieldCheck,
   ListChecks,
+  Video,
+  BookMarked,
+  NotebookText,
+  ShoppingBag,
 } from "lucide-react";
 import Pill from "../components/Pill";
 import Card from "../components/Card";
@@ -54,6 +58,13 @@ const FEATURES = [
     desc: "Track daily revision goals, monitor topic-wise accuracy, and pinpoint high-yield knowledge gaps with real-time clinical analytics.",
     tone: "green",
   },
+];
+
+const QUICK_LINKS = [
+  { icon: Video, label: "Lectures", desc: "Watch topic videos", to: "/lectures", tone: "purple" },
+  { icon: BookMarked, label: "OSPE Material", desc: "Subject reference guides", to: "/ospe-books", tone: "gold" },
+  { icon: NotebookText, label: "Books & Study Notes", desc: "Block-wise notes & books", to: "/study-notes", tone: "teal" },
+  { icon: ShoppingBag, label: "Shop", desc: "Merch & study essentials", to: "/shop", tone: "green" },
 ];
 
 const FAQS = [
@@ -142,6 +153,50 @@ export default function Home() {
             </Pill>
           ))}
         </div>
+      </section>
+
+      {/* Quick Links — Lectures, OSPE Material, Books & Study Notes, Shop */}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {QUICK_LINKS.map((link) => (
+          <Card
+            key={link.to}
+            t={t}
+            className="flex flex-col items-start gap-2.5 p-4 cursor-pointer transition-all hover:scale-[1.02]"
+            style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+            onClick={() => navigate(link.to)}
+          >
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-2xl"
+              style={{
+                backgroundColor:
+                  link.tone === "teal"
+                    ? `${t.teal}20`
+                    : link.tone === "purple"
+                    ? `${t.purple}20`
+                    : link.tone === "gold"
+                    ? `${t.gold}20`
+                    : `${t.green}20`,
+              }}
+            >
+              <link.icon
+                size={19}
+                color={
+                  link.tone === "teal"
+                    ? t.teal
+                    : link.tone === "purple"
+                    ? t.purple
+                    : link.tone === "gold"
+                    ? t.gold
+                    : t.green
+                }
+              />
+            </div>
+            <div>
+              <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 14.5 }}>{link.label}</div>
+              <div style={{ color: t.textMuted, fontSize: 11.5, marginTop: 1 }}>{link.desc}</div>
+            </div>
+          </Card>
+        ))}
       </section>
 
       {/* Quick Metrics Bar */}

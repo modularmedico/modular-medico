@@ -19,6 +19,7 @@ import {
   Video,
   ShoppingBag,
   BookMarked,
+  NotebookText,
 } from "lucide-react";
 import Logomark from "./Logomark";
 import Footer from "./Footer";
@@ -38,7 +39,8 @@ const NAV_ITEMS = [
 // not in the 5-slot bottom mobile tab bar (kept lean on purpose).
 const SECONDARY_NAV_ITEMS = [
   { to: "/lectures", label: "Lectures", icon: Video },
-  { to: "/ospe-books", label: "OSPE Books", icon: BookMarked },
+  { to: "/ospe-books", label: "OSPE Material", icon: BookMarked },
+  { to: "/study-notes", label: "Books & Study Notes", icon: NotebookText },
   { to: "/shop", label: "Shop", icon: ShoppingBag },
 ];
 
