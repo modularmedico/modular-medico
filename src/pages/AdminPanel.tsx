@@ -107,46 +107,6 @@ export default function AdminPanel() {
   // incomplete rather than letting an empty bank look like "0 questions saved".
   const [bankLoadWarning, setBankLoadWarning] = useState<string | null>(null);
 
-  // Subscribe to questions for the Manage tab.
-  //
-  // Previously this always ran subscribeAllQuestions() — a single unbounded
-  // onSnapshot over the ENTIRE `questions` collection (every block, module,
-  // subject, published + draft) every time the admin opened this screen.
-  // That listener only gets heavier as the bank grows, its first sync could
-  // stall or fail on a slow connection, and one bad/oversized payload could
-  // make the whole Manage MCQs list come back empty or incomplete — which is
-  // the intermittent "MCQs don't show up" symptom.
-  //
-  // Now the admin picks a Block + Module + Subject first (mirroring the same
-  // Block -> Module -> Subject -> Subheading scaffold used everywhere else),
-  // and we only ever subscribe to that one scoped slice via
-  // subscribeScopedQuestions(). Subheading/difficulty/status/search still
-  // filter client-side within that (already small) slice.
-  const manageScopeReady = filterBlock !== "all" && filterModule !== "all" && filterSubject !== "all";
-
-  useEffect(() => {
-    if (!manageScopeReady) {
-      setAllQuestions([]);
-      setLoadingQuestions(false);
-      setBankLoadWarning(null);
-      return;
-    }
-    setLoadingQuestions(true);
-    setBankLoadWarning(null);
-    const unsub = subscribeScopedQuestions(
-      filterSubject,
-      filterModule,
-      Number(filterBlock),
-      (qs) => {
-        setAllQuestions(qs);
-        setLoadingQuestions(false);
-      },
-      (_reason, message) => setBankLoadWarning(message)
-    );
-    return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manageScopeReady, filterBlock, filterModule, filterSubject]);
-
   /* ------------------------------------------------------------------------- */
   /* ADD MCQ STATE                                                             */
   /* ------------------------------------------------------------------------- */
@@ -202,6 +162,46 @@ export default function AdminPanel() {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  // Subscribe to questions for the Manage tab.
+  //
+  // Previously this always ran subscribeAllQuestions() — a single unbounded
+  // onSnapshot over the ENTIRE `questions` collection (every block, module,
+  // subject, published + draft) every time the admin opened this screen.
+  // That listener only gets heavier as the bank grows, its first sync could
+  // stall or fail on a slow connection, and one bad/oversized payload could
+  // make the whole Manage MCQs list come back empty or incomplete — which is
+  // the intermittent "MCQs don't show up" symptom.
+  //
+  // Now the admin picks a Block + Module + Subject first (mirroring the same
+  // Block -> Module -> Subject -> Subheading scaffold used everywhere else),
+  // and we only ever subscribe to that one scoped slice via
+  // subscribeScopedQuestions(). Subheading/difficulty/status/search still
+  // filter client-side within that (already small) slice.
+  const manageScopeReady = filterBlock !== "all" && filterModule !== "all" && filterSubject !== "all";
+
+  useEffect(() => {
+    if (!manageScopeReady) {
+      setAllQuestions([]);
+      setLoadingQuestions(false);
+      setBankLoadWarning(null);
+      return;
+    }
+    setLoadingQuestions(true);
+    setBankLoadWarning(null);
+    const unsub = subscribeScopedQuestions(
+      filterSubject,
+      filterModule,
+      Number(filterBlock),
+      (qs) => {
+        setAllQuestions(qs);
+        setLoadingQuestions(false);
+      },
+      (_reason, message) => setBankLoadWarning(message)
+    );
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manageScopeReady, filterBlock, filterModule, filterSubject]);
 
   /* ------------------------------------------------------------------------- */
   /* LECTURES STATE (own Block -> Module -> Subject -> Subheading hierarchy,   */
