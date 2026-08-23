@@ -32,7 +32,10 @@ import {
   Crown,
   GraduationCap,
   FolderTree,
+  BarChart3,
+  TrendingUp,
 } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
@@ -85,6 +88,11 @@ import {
   deleteStudyNote,
   subscribeAllStudyNotes,
 } from "../services/studyNotes";
+import {
+  subscribeSiteStatsSummary,
+  subscribeDailyVisits,
+  type DailyVisitPoint,
+} from "../services/siteStats";
 import { parseBracketFormat } from "../utils/parseBracketFormat";
 import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreStudyNote, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 
@@ -98,6 +106,7 @@ const ADMIN_TABS = [
   { id: "add_study_notes", label: "Add Study Notes", icon: GraduationCap },
   { id: "manage_study_notes", label: "Manage Study Notes", icon: FolderTree },
   { id: "manage_access", label: "Manage Access", icon: Users },
+  { id: "site_stats", label: "Site Visits", icon: BarChart3 },
 ] as const;
 
 type AdminTab = typeof ADMIN_TABS[number]["id"];
@@ -183,6 +192,29 @@ export default function AdminPanel() {
       setAccessSaving((s) => ({ ...s, [u.uid]: false }));
     }
   };
+
+  // Site Visits — all-time total + last-30-days trend, admin-only reads
+  // enforced by firestore.rules. See src/services/siteStats.ts.
+  const [totalVisits, setTotalVisits] = useState<number>(0);
+  const [dailyVisits, setDailyVisits] = useState<DailyVisitPoint[]>([]);
+  const [loadingVisits, setLoadingVisits] = useState(true);
+
+  useEffect(() => {
+    if (activeTab !== "site_stats") return;
+    setLoadingVisits(true);
+    const unsubSummary = subscribeSiteStatsSummary((stats) => {
+      setTotalVisits(stats.totalVisits);
+      setLoadingVisits(false);
+    });
+    const unsubDaily = subscribeDailyVisits(30, (points) => setDailyVisits(points));
+    return () => {
+      unsubSummary();
+      unsubDaily();
+    };
+  }, [activeTab]);
+
+  const todaysVisits = dailyVisits.length > 0 ? dailyVisits[dailyVisits.length - 1].count : 0;
+  const last7DaysVisits = dailyVisits.slice(-7).reduce((sum, p) => sum + p.count, 0);
 
   // Questions state for management
   const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);
@@ -1164,6 +1196,14 @@ export default function AdminPanel() {
                   style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
                 >
                   {studyNotes.length}
+                </span>
+              )}
+              {tab.id === "site_stats" && (
+                <span
+                  className="rounded-full px-2 py-0.2 text-[11px] font-mono font-bold"
+                  style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
+                >
+                  {totalVisits}
                 </span>
               )}
             </button>
@@ -3435,6 +3475,100 @@ export default function AdminPanel() {
                 );
               })}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB: SITE VISITS — total visits + last-30-day trend                   */}
+      {/* ===================================================================== */}
+      {activeTab === "site_stats" && (
+        <div className="flex flex-col gap-5">
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-start gap-3">
+              <BarChart3 size={18} color={t.purple} className="mt-0.5 shrink-0" />
+              <div>
+                <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
+                  Site Visits
+                </h2>
+                <p className="mt-1 text-xs" style={{ color: t.textMuted }}>
+                  Counts one visit per browser session (not every page view), so this reflects
+                  roughly how many people opened the site, not how many pages they clicked through.
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          {loadingVisits ? (
+            <div className="py-16 text-center">
+              <Spinner t={t} size={24} label="Loading visit stats\u2026" />
+            </div>
+          ) : (
+            <>
+              {/* Summary stat cards */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                    <TrendingUp size={13} /> All-Time Visits
+                  </div>
+                  <div style={{ fontFamily: FONT_MONO, fontWeight: 800, fontSize: 32, marginTop: 6 }}>
+                    {totalVisits.toLocaleString()}
+                  </div>
+                </Card>
+                <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                    <TrendingUp size={13} /> Today
+                  </div>
+                  <div style={{ fontFamily: FONT_MONO, fontWeight: 800, fontSize: 32, marginTop: 6 }}>
+                    {todaysVisits.toLocaleString()}
+                  </div>
+                </Card>
+                <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                    <TrendingUp size={13} /> Last 7 Days
+                  </div>
+                  <div style={{ fontFamily: FONT_MONO, fontWeight: 800, fontSize: 32, marginTop: 6 }}>
+                    {last7DaysVisits.toLocaleString()}
+                  </div>
+                </Card>
+              </div>
+
+              {/* Trend chart */}
+              <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+                <div className="mb-3 flex items-center justify-between">
+                  <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>
+                    Last 30 Days
+                  </span>
+                </div>
+                {dailyVisits.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-12 text-center" style={{ color: t.textFaint }}>
+                    <BarChart3 size={28} />
+                    <p className="text-sm">No visits recorded yet.</p>
+                  </div>
+                ) : (
+                  <div style={{ width: "100%", height: 260 }}>
+                    <ResponsiveContainer>
+                      <LineChart data={dailyVisits} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={t.border} />
+                        <XAxis
+                          dataKey="date"
+                          tickFormatter={(v: string) => v.slice(5)}
+                          tick={{ fontSize: 11, fill: t.textFaint }}
+                          axisLine={{ stroke: t.border }}
+                          tickLine={false}
+                        />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: t.textFaint }} axisLine={false} tickLine={false} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}`, borderRadius: 10, fontSize: 12 }}
+                          labelStyle={{ color: t.text, fontWeight: 700 }}
+                        />
+                        <Line type="monotone" dataKey="count" name="Visits" stroke={t.purpleStrong} strokeWidth={2.5} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </Card>
+            </>
           )}
         </div>
       )}

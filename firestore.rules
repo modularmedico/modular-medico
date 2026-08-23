@@ -92,5 +92,29 @@ service cloud.firestore {
       allow get, list: if resource.data.status == 'published' || isAdmin();
       allow create, update, delete: if isAdmin();
     }
+
+    // ---------------------------------------------------------------
+    // Site visit counters (see src/services/siteStats.ts). Writes don't
+    // require auth (guests/students visiting the site trigger these), but
+    // each write may only ever move a counter forward by exactly 1 — never
+    // set it to an arbitrary value — and only an admin can read the totals
+    // shown in the "Site Visits" admin tab.
+    // ---------------------------------------------------------------
+    match /siteStats/{docId} {
+      allow get, list: if isAdmin();
+      allow create: if docId == 'summary' && request.resource.data.totalVisits == 1;
+      allow update: if docId == 'summary'
+        && request.resource.data.totalVisits == resource.data.totalVisits + 1
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['totalVisits', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /siteStats_daily/{dayId} {
+      allow get, list: if isAdmin();
+      allow create: if request.resource.data.count == 1;
+      allow update: if request.resource.data.count == resource.data.count + 1
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count', 'updatedAt', 'date']);
+      allow delete: if false;
+    }
   }
 }

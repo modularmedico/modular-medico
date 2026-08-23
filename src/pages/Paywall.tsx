@@ -17,7 +17,7 @@ const PERKS = [
 // Admin's WhatsApp number for handling purchases/upgrades manually — every
 // "Subscribe" / "Unlock" action on this page hands off to a WhatsApp chat
 // with this number instead of taking payment in-app.
-const PURCHASE_WHATSAPP_NUMBER = "923187561879"; // +92 318 7561879, no punctuation for wa.me
+const PURCHASE_WHATSAPP_NUMBER = "923150651584"; // +92 315 0651584, no punctuation for wa.me
 
 export default function Paywall() {
   const navigate = useNavigate();
@@ -137,7 +137,7 @@ export default function Paywall() {
       </div>
 
       <p className="text-center text-xs" style={{ color: t.textFaint }}>
-        You'll be redirected to WhatsApp ({"+92 318 7561879"}) to complete your subscription.
+        You'll be redirected to WhatsApp ({"+92 315 0651584"}) to complete your subscription.
       </p>
     </div>
   );
