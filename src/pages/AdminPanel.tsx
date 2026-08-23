@@ -151,10 +151,24 @@ export default function AdminPanel() {
   /* ------------------------------------------------------------------------- */
   /* MANAGE MCQs FILTER STATE                                                  */
   /* ------------------------------------------------------------------------- */
+  // Remember the admin's last-viewed Block/Module/Subject scope across visits
+  // (per browser) so re-opening the Manage MCQs tab loads results immediately
+  // instead of sitting on the "choose a scope" empty state every single time.
+  const MANAGE_SCOPE_KEY = "modular_medico_manage_mcq_scope";
+  const initialManageScope = (() => {
+    try {
+      const raw = localStorage.getItem(MANAGE_SCOPE_KEY);
+      if (raw) return JSON.parse(raw) as { block: string; module: string; subject: string };
+    } catch {
+      // ignore
+    }
+    return { block: "all", module: "all", subject: "all" };
+  })();
+
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterBlock, setFilterBlock] = useState<string>("all");
-  const [filterModule, setFilterModule] = useState<string>("all");
-  const [filterSubject, setFilterSubject] = useState<string>("all");
+  const [filterBlock, setFilterBlock] = useState<string>(initialManageScope.block);
+  const [filterModule, setFilterModule] = useState<string>(initialManageScope.module);
+  const [filterSubject, setFilterSubject] = useState<string>(initialManageScope.subject);
   const [filterDifficulty, setFilterDifficulty] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterTopic, setFilterTopic] = useState<string>("all");
@@ -162,6 +176,18 @@ export default function AdminPanel() {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        MANAGE_SCOPE_KEY,
+        JSON.stringify({ block: filterBlock, module: filterModule, subject: filterSubject })
+      );
+    } catch {
+      // ignore — non-critical convenience feature
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterBlock, filterModule, filterSubject]);
 
   // Subscribe to questions for the Manage tab.
   //
@@ -177,7 +203,9 @@ export default function AdminPanel() {
   // Block -> Module -> Subject -> Subheading scaffold used everywhere else),
   // and we only ever subscribe to that one scoped slice via
   // subscribeScopedQuestions(). Subheading/difficulty/status/search still
-  // filter client-side within that (already small) slice.
+  // filter client-side within that (already small) slice. Firestore's
+  // persistent local cache (see firebase.ts) means this listener resolves
+  // from disk instantly on a repeat visit, then reconciles with the server.
   const manageScopeReady = filterBlock !== "all" && filterModule !== "all" && filterSubject !== "all";
 
   useEffect(() => {
