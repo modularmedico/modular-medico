@@ -26,6 +26,8 @@ import {
   ExternalLink,
   BookMarked,
   Library,
+  Pencil,
+  Save,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
@@ -42,6 +44,7 @@ import {
 } from "../data/subjects";
 import {
   addQuestion,
+  updateQuestion,
   bulkAddQuestions,
   updateQuestionStatus,
   deleteQuestion,
@@ -176,6 +179,18 @@ export default function AdminPanel() {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  // Inline "edit this MCQ" state — id of the card currently expanded into edit
+  // mode, plus a scratch copy of its editable fields. Kept separate from the
+  // Add-MCQ form's state so opening an edit never clobbers an in-progress add.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editQ, setEditQ] = useState("");
+  const [editOptions, setEditOptions] = useState<string[]>(["", "", "", ""]);
+  const [editCorrectIdx, setEditCorrectIdx] = useState(0);
+  const [editExplanation, setEditExplanation] = useState("");
+  const [editDifficulty, setEditDifficulty] = useState<Difficulty>("medium");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -690,6 +705,60 @@ export default function AdminPanel() {
     } finally {
       setBulkDeleting(false);
       setBulkDeleteConfirm(false);
+    }
+  };
+
+  // Open a question's card in inline edit mode, seeding the scratch fields
+  // from its current values. Closes any other open edit / delete-confirm first.
+  const handleStartEdit = (qItem: FirestoreQuestion) => {
+    setEditingId(qItem.id);
+    setEditQ(qItem.q);
+    setEditOptions([...qItem.options]);
+    setEditCorrectIdx(qItem.correct);
+    setEditExplanation(qItem.explanation);
+    setEditDifficulty(qItem.difficulty);
+    setEditError(null);
+    setDeleteConfirmId(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditError(null);
+  };
+
+  const isEditValid =
+    editQ.trim().length > 0 &&
+    editOptions.every((o) => o.trim().length > 0) &&
+    editExplanation.trim().length > 0 &&
+    editCorrectIdx >= 0 &&
+    editCorrectIdx < editOptions.length;
+
+  const handleSaveEdit = async (qItem: FirestoreQuestion) => {
+    if (!isEditValid) return;
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      await updateQuestion(qItem.id, {
+        subjectId: qItem.subjectId,
+        moduleId: qItem.moduleId,
+        moduleName: qItem.moduleName,
+        block: qItem.block,
+        topicId: qItem.topicId ?? null,
+        topicName: qItem.topicName ?? null,
+        difficulty: editDifficulty,
+        q: editQ.trim(),
+        options: editOptions.map((o) => o.trim()),
+        correct: editCorrectIdx,
+        explanation: editExplanation.trim(),
+        status: qItem.status,
+      });
+      setEditingId(null);
+      setActionNotice(`Updated MCQ: "${editQ.trim().slice(0, 35)}..."`);
+      setTimeout(() => setActionNotice(null), 3500);
+    } catch (err) {
+      setEditError(err instanceof QuestionSaveError ? err.message : "Failed to save changes. Please try again.");
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -1646,6 +1715,7 @@ export default function AdminPanel() {
               {filteredQuestions.map((qItem, idx) => {
                 const subjectMeta = SUBJECT_META[qItem.subjectId as keyof typeof SUBJECT_META];
                 const isDeletePrompt = deleteConfirmId === qItem.id;
+                const isEditing = editingId === qItem.id;
 
                 return (
                   <div
@@ -1675,12 +1745,23 @@ export default function AdminPanel() {
                         </button>
                       </div>
 
-                      {/* Actions: Delete with confirmation */}
-                      <div>
+                      {/* Actions: Edit, and Delete with confirmation */}
+                      <div className="flex items-center gap-2">
+                        {!isEditing && !isDeletePrompt && (
+                          <button
+                            onClick={() => handleStartEdit(qItem)}
+                            className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition-all"
+                            style={{ color: t.purpleStrong }}
+                            title="Edit this question"
+                          >
+                            <Pencil size={14} /> Edit
+                          </button>
+                        )}
                         {!isDeletePrompt ? (
                           <button
                             onClick={() => setDeleteConfirmId(qItem.id)}
-                            className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition-all text-red-400 hover:bg-red-500/10"
+                            disabled={isEditing}
+                            className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition-all text-red-400 hover:bg-red-500/10 disabled:opacity-30"
                             title="Delete this question"
                           >
                             <Trash2 size={14} /> Remove
@@ -1706,41 +1787,164 @@ export default function AdminPanel() {
                       </div>
                     </div>
 
-                    {/* Question Stem */}
-                    <h3 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16, lineHeight: 1.4 }}>
-                      {qItem.q}
-                    </h3>
+                    {!isEditing ? (
+                      <>
+                        {/* Question Stem */}
+                        <h3 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16, lineHeight: 1.4 }}>
+                          {qItem.q}
+                        </h3>
 
-                    {/* Options Grid */}
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {qItem.options.map((opt, optIdx) => {
-                        const isCorrect = optIdx === qItem.correct;
-                        const letter = String.fromCharCode(65 + optIdx);
-                        return (
-                          <div
-                            key={optIdx}
-                            className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold"
-                            style={{
-                              backgroundColor: isCorrect ? `${t.green}20` : t.surfaceAlt,
-                              border: `1.5px solid ${isCorrect ? t.green : t.border}`,
-                              color: isCorrect ? t.green : t.text,
-                            }}
-                          >
-                            <span className="font-mono text-[11px] font-bold">{letter}.</span>
-                            <span className="flex-1">{opt}</span>
-                            {isCorrect && <Check size={14} color={t.green} />}
+                        {/* Options Grid */}
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {qItem.options.map((opt, optIdx) => {
+                            const isCorrect = optIdx === qItem.correct;
+                            const letter = String.fromCharCode(65 + optIdx);
+                            return (
+                              <div
+                                key={optIdx}
+                                className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold"
+                                style={{
+                                  backgroundColor: isCorrect ? `${t.green}20` : t.surfaceAlt,
+                                  border: `1.5px solid ${isCorrect ? t.green : t.border}`,
+                                  color: isCorrect ? t.green : t.text,
+                                }}
+                              >
+                                <span className="font-mono text-[11px] font-bold">{letter}.</span>
+                                <span className="flex-1">{opt}</span>
+                                {isCorrect && <Check size={14} color={t.green} />}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Explanation */}
+                        {qItem.explanation && (
+                          <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: `${t.purple}12`, border: `1px solid ${t.purple}33` }}>
+                            <span className="font-bold block mb-1" style={{ color: isDark ? "#c4b5fd" : t.purpleStrong }}>
+                              Rationale &amp; High-Yield Concept:
+                            </span>
+                            <p style={{ color: t.textMuted, lineHeight: 1.5 }}>{qItem.explanation}</p>
                           </div>
-                        );
-                      })}
-                    </div>
+                        )}
+                      </>
+                    ) : (
+                      /* --------------------------------------------------- */
+                      /* Inline Edit Form                                    */
+                      /* --------------------------------------------------- */
+                      <div className="flex flex-col gap-4">
+                        <div>
+                          <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                            Question Prompt / Clinical Stem
+                          </label>
+                          <textarea
+                            value={editQ}
+                            onChange={(e) => setEditQ(e.target.value)}
+                            rows={3}
+                            placeholder="Enter the complete question text..."
+                            className="w-full rounded-xl p-3 text-sm outline-none resize-y"
+                            style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                          />
+                        </div>
 
-                    {/* Explanation */}
-                    {qItem.explanation && (
-                      <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: `${t.purple}12`, border: `1px solid ${t.purple}33` }}>
-                        <span className="font-bold block mb-1" style={{ color: isDark ? "#c4b5fd" : t.purpleStrong }}>
-                          Rationale &amp; High-Yield Concept:
-                        </span>
-                        <p style={{ color: t.textMuted, lineHeight: 1.5 }}>{qItem.explanation}</p>
+                        <div>
+                          <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                            Options (Select the Radio for the Correct Answer)
+                          </label>
+                          <div className="grid gap-2.5 sm:grid-cols-2">
+                            {editOptions.map((opt, i) => {
+                              const letter = String.fromCharCode(65 + i);
+                              const isCorrect = editCorrectIdx === i;
+                              return (
+                                <div
+                                  key={i}
+                                  className="flex items-center gap-2 rounded-xl p-2.5 transition-all"
+                                  style={{
+                                    backgroundColor: isCorrect ? `${t.green}18` : t.surfaceAlt,
+                                    border: `1.5px solid ${isCorrect ? t.green : t.border}`,
+                                  }}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={`editCorrectOption-${qItem.id}`}
+                                    checked={isCorrect}
+                                    onChange={() => setEditCorrectIdx(i)}
+                                    className="accent-emerald-500 h-4 w-4 cursor-pointer"
+                                  />
+                                  <span className="font-mono text-xs font-bold">{letter}.</span>
+                                  <input
+                                    type="text"
+                                    value={opt}
+                                    onChange={(e) => {
+                                      const next = [...editOptions];
+                                      next[i] = e.target.value;
+                                      setEditOptions(next);
+                                    }}
+                                    placeholder={`Option ${letter}`}
+                                    className="w-full bg-transparent text-xs font-medium outline-none"
+                                    style={{ color: t.text }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                              Difficulty
+                            </label>
+                            <div className="flex gap-2">
+                              {(["easy", "medium", "hard"] as Difficulty[]).map((d) => (
+                                <button
+                                  key={d}
+                                  onClick={() => setEditDifficulty(d)}
+                                  className="flex-1 rounded-xl px-3 py-2 text-xs font-bold capitalize transition-all"
+                                  style={{
+                                    backgroundColor: editDifficulty === d ? `${t.gold}20` : t.surfaceAlt,
+                                    border: `1.5px solid ${editDifficulty === d ? t.gold : t.border}`,
+                                    color: editDifficulty === d ? t.gold : t.textMuted,
+                                  }}
+                                >
+                                  {d}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                            Clinical Explanation &amp; Rationale
+                          </label>
+                          <textarea
+                            value={editExplanation}
+                            onChange={(e) => setEditExplanation(e.target.value)}
+                            rows={2}
+                            placeholder="Explain why the correct answer is right and why distractors are wrong..."
+                            className="w-full rounded-xl p-3 text-sm outline-none resize-y"
+                            style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                          />
+                        </div>
+
+                        {editError && (
+                          <p className="text-xs font-semibold" style={{ color: t.red }}>{editError}</p>
+                        )}
+
+                        <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
+                          <Btn t={t} variant="ghost" onClick={handleCancelEdit} disabled={editSaving}>
+                            Cancel
+                          </Btn>
+                          <Btn
+                            t={t}
+                            icon={editSaving ? Loader2 : Save}
+                            spin={editSaving}
+                            disabled={!isEditValid || editSaving}
+                            onClick={() => handleSaveEdit(qItem)}
+                          >
+                            {editSaving ? "Saving\u2026" : "Save Changes"}
+                          </Btn>
+                        </div>
                       </div>
                     )}
                   </div>

@@ -621,6 +621,28 @@ export async function addQuestion(input: QuestionInput): Promise<SaveResult> {
   }
 }
 
+/**
+ * Update an existing MCQ in place (question text, options, correct answer,
+ * explanation, difficulty, and/or its Block/Module/Subject/Topic tagging).
+ * Mirrors addQuestion's error handling: a failed write throws a
+ * QuestionSaveError with a ready-to-display message rather than silently
+ * caching the edit locally, so a rejected edit is never mistaken for success.
+ */
+export async function updateQuestion(id: string, input: QuestionInput): Promise<SaveResult> {
+  const cleanInput = {
+    ...input,
+    status: input.status ?? "draft",
+  };
+  try {
+    await updateDoc(doc(db, "questions", id), cleanInput);
+    return { source: "firestore" };
+  } catch (err) {
+    console.error("Firestore updateQuestion failed:", err);
+    const reason = classifyWriteError(err);
+    throw new QuestionSaveError(reason, messageForReason(reason, false));
+  }
+}
+
 export async function bulkAddQuestions(inputs: QuestionInput[]): Promise<SaveResult> {
   try {
     const batch = writeBatch(db);
