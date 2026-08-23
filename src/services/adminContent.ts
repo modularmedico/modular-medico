@@ -829,6 +829,70 @@ export function subscribeAllQuestions(
   );
 }
 
+/**
+ * Live view of questions SCOPED to one Block + Module + Subject (all statuses,
+ * for the admin Manage MCQs screen). This is the scoped counterpart to
+ * subscribeAllQuestions(): instead of listening to the *entire* `questions`
+ * collection (every block, every module, every subject, published + draft —
+ * an unbounded listener that only gets heavier as the bank grows, and whose
+ * huge initial payload is what made the Manage MCQs list intermittently fail
+ * to render or come back incomplete), this only asks Firestore for the slice
+ * the admin is actually looking at. All three clauses are plain equality
+ * filters, so — unlike range/orderBy combinations — Firestore can serve this
+ * from the automatic single-field indexes without needing a new composite
+ * index entry.
+ */
+export function subscribeScopedQuestions(
+  subjectId: string,
+  moduleId: string,
+  block: number,
+  cb: (questions: FirestoreQuestion[]) => void,
+  onError?: (reason: "permission-denied" | "offline" | "unknown", message: string) => void
+) {
+  const deleted = getDeletedQuestionIds();
+  const q = query(
+    collection(db, "questions"),
+    where("subjectId", "==", subjectId),
+    where("moduleId", "==", moduleId),
+    where("block", "==", block)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const fsQuestions = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
+      const localQs = getLocalQuestions().filter(
+        (lq) => lq.subjectId === subjectId && lq.moduleId === moduleId && lq.block === block
+      );
+      const defQuestions = DEFAULT_QUESTIONS.filter(
+        (dq) => dq.subjectId === subjectId && dq.moduleId === moduleId && dq.block === block
+      );
+      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
+    },
+    (err) => {
+      console.warn("Firestore scoped questions fallback:", err.message);
+      const localQs = getLocalQuestions().filter(
+        (lq) => lq.subjectId === subjectId && lq.moduleId === moduleId && lq.block === block
+      );
+      const defQuestions = DEFAULT_QUESTIONS.filter(
+        (dq) => dq.subjectId === subjectId && dq.moduleId === moduleId && dq.block === block
+      );
+      cb(mergeQuestionSources(defQuestions, localQs, []));
+
+      const reason = classifyWriteError(err);
+      onError?.(
+        reason,
+        reason === "permission-denied"
+          ? "Your account isn't a real Firestore admin yet, so this slice can't be listed — you're only seeing MCQs cached in this browser. Run scripts/setAdminClaim.mjs to fix this."
+          : reason === "offline"
+          ? "You appear to be offline — only locally cached MCQs are shown."
+          : "Couldn't load this slice of the MCQ bank from Firestore — only locally cached MCQs are shown."
+      );
+    }
+  );
+}
+
 /** One-time fetch of published questions for a practice session */
 export async function fetchPublishedBlock(
   subjectId: string,

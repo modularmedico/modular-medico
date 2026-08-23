@@ -46,7 +46,7 @@ import {
   updateQuestionStatus,
   deleteQuestion,
   bulkDeleteQuestions,
-  subscribeAllQuestions,
+  subscribeScopedQuestions,
   subscribeTopics,
   createTopic,
   deleteTopic,
@@ -107,10 +107,36 @@ export default function AdminPanel() {
   // incomplete rather than letting an empty bank look like "0 questions saved".
   const [bankLoadWarning, setBankLoadWarning] = useState<string | null>(null);
 
-  // Subscribe to all questions
+  // Subscribe to questions for the Manage tab.
+  //
+  // Previously this always ran subscribeAllQuestions() — a single unbounded
+  // onSnapshot over the ENTIRE `questions` collection (every block, module,
+  // subject, published + draft) every time the admin opened this screen.
+  // That listener only gets heavier as the bank grows, its first sync could
+  // stall or fail on a slow connection, and one bad/oversized payload could
+  // make the whole Manage MCQs list come back empty or incomplete — which is
+  // the intermittent "MCQs don't show up" symptom.
+  //
+  // Now the admin picks a Block + Module + Subject first (mirroring the same
+  // Block -> Module -> Subject -> Subheading scaffold used everywhere else),
+  // and we only ever subscribe to that one scoped slice via
+  // subscribeScopedQuestions(). Subheading/difficulty/status/search still
+  // filter client-side within that (already small) slice.
+  const manageScopeReady = filterBlock !== "all" && filterModule !== "all" && filterSubject !== "all";
+
   useEffect(() => {
+    if (!manageScopeReady) {
+      setAllQuestions([]);
+      setLoadingQuestions(false);
+      setBankLoadWarning(null);
+      return;
+    }
     setLoadingQuestions(true);
-    const unsub = subscribeAllQuestions(
+    setBankLoadWarning(null);
+    const unsub = subscribeScopedQuestions(
+      filterSubject,
+      filterModule,
+      Number(filterBlock),
       (qs) => {
         setAllQuestions(qs);
         setLoadingQuestions(false);
@@ -118,7 +144,8 @@ export default function AdminPanel() {
       (_reason, message) => setBankLoadWarning(message)
     );
     return () => unsub();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manageScopeReady, filterBlock, filterModule, filterSubject]);
 
   /* ------------------------------------------------------------------------- */
   /* ADD MCQ STATE                                                             */
@@ -166,6 +193,7 @@ export default function AdminPanel() {
   /* ------------------------------------------------------------------------- */
   const [searchQuery, setSearchQuery] = useState("");
   const [filterBlock, setFilterBlock] = useState<string>("all");
+  const [filterModule, setFilterModule] = useState<string>("all");
   const [filterSubject, setFilterSubject] = useState<string>("all");
   const [filterDifficulty, setFilterDifficulty] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -675,7 +703,7 @@ export default function AdminPanel() {
   // so the count shown in the confirm prompt always matches what's on screen.
   useEffect(() => {
     setBulkDeleteConfirm(false);
-  }, [filterBlock, filterSubject, filterDifficulty, filterStatus, filterTopic, searchQuery]);
+  }, [filterBlock, filterModule, filterSubject, filterDifficulty, filterStatus, filterTopic, searchQuery]);
 
   // Distinct topic names present in the bank, given the other active filters (Block/Subject scoped),
   // used to populate the Topic filter dropdown in the Manage tab.
@@ -745,7 +773,7 @@ export default function AdminPanel() {
             >
               <tab.icon size={15} className="shrink-0" />
               {tab.label}
-              {tab.id === "manage_mcq" && (
+              {tab.id === "manage_mcq" && manageScopeReady && (
                 <span
                   className="rounded-full px-2 py-0.2 text-[11px] font-mono font-bold"
                   style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
@@ -1392,9 +1420,27 @@ export default function AdminPanel() {
                     className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
                     style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
                   >
-                    <option value="all">All Blocks (1–15)</option>
+                    <option value="all">Select a Block&hellip;</option>
                     {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1).map((b) => (
                       <option key={b} value={b}>Block {b}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Module Filter */}
+                <div>
+                  <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                    Module
+                  </label>
+                  <select
+                    value={filterModule}
+                    onChange={(e) => setFilterModule(e.target.value)}
+                    className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  >
+                    <option value="all">Select a Module&hellip;</option>
+                    {MASTER_MODULES.map((m) => (
+                      <option key={m.name} value={m.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}>{m.name}</option>
                     ))}
                   </select>
                 </div>
@@ -1410,7 +1456,7 @@ export default function AdminPanel() {
                     className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
                     style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
                   >
-                    <option value="all">All Subjects</option>
+                    <option value="all">Select a Subject&hellip;</option>
                     {SUBJECT_LIST.map((s) => (
                       <option key={s} value={s}>{SUBJECT_META[s].label}</option>
                     ))}
@@ -1485,13 +1531,16 @@ export default function AdminPanel() {
           {/* Results Summary Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="text-xs font-bold" style={{ color: t.textMuted }}>
-              Showing {filteredQuestions.length} of {allQuestions.length} Total MCQs
+              {manageScopeReady
+                ? `Showing ${filteredQuestions.length} of ${allQuestions.length} MCQs in this Block \u2022 Module \u2022 Subject`
+                : "Pick a Block, Module, and Subject above to load its MCQs"}
             </span>
             <div className="flex items-center gap-3">
-              {(filterBlock !== "all" || filterSubject !== "all" || filterDifficulty !== "all" || filterStatus !== "all" || filterTopic !== "all" || searchQuery) && (
+              {(filterBlock !== "all" || filterModule !== "all" || filterSubject !== "all" || filterDifficulty !== "all" || filterStatus !== "all" || filterTopic !== "all" || searchQuery) && (
                 <button
                   onClick={() => {
                     setFilterBlock("all");
+                    setFilterModule("all");
                     setFilterSubject("all");
                     setFilterDifficulty("all");
                     setFilterStatus("all");
@@ -1544,7 +1593,15 @@ export default function AdminPanel() {
           </div>
 
           {/* Questions List */}
-          {loadingQuestions ? (
+          {!manageScopeReady ? (
+            <div className="rounded-2xl p-12 text-center flex flex-col items-center gap-3" style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+              <Search size={32} color={t.textFaint} />
+              <p style={{ color: t.textMuted, fontSize: 15 }}>
+                Choose a Block, Module, and Subject above. Only that slice of the bank is<br />
+                loaded, instead of every MCQ across every block at once.
+              </p>
+            </div>
+          ) : loadingQuestions ? (
             <div className="py-16 text-center">
               <Spinner t={t} size={24} label="Loading question bank\u2026" />
             </div>
