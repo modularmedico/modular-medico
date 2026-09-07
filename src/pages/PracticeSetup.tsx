@@ -594,6 +594,11 @@ export default function PracticeSetup() {
       <Btn t={t} full icon={loading ? Loader2 : ArrowRight} spin={loading} disabled={loading || count === 0} onClick={start}>
         {loading ? "Preparing session\u2026" : count === 0 ? "No published questions yet" : `Start Practice Session`}
       </Btn>
+      {loading && (
+        <p className="-mt-2 text-center" style={{ color: t.textFaint, fontSize: 11 }}>
+          It may take 1-2 minutes when loading first time
+        </p>
+      )}
     </div>
   );
 }
