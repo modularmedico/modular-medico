@@ -44,8 +44,17 @@ export default function SubjectDetail() {
     subjectTotalCounts: {},
   });
 
+  const [countsLoaded, setCountsLoaded] = useState(false);
+
   useEffect(() => subscribeBlockDefinitions(setBlockDefs), []);
-  useEffect(() => subscribeCurriculumCounts(setCounts), []);
+  useEffect(
+    () =>
+      subscribeCurriculumCounts((c) => {
+        setCounts(c);
+        setCountsLoaded(true);
+      }),
+    []
+  );
   useEffect(
     () =>
       subscribePublishedQuestions((qs) => {
@@ -135,7 +144,7 @@ export default function SubjectDetail() {
                 className="rounded-full px-2.5 py-0.5 font-mono text-xs font-bold"
                 style={{ backgroundColor: `${t.gold}20`, color: t.gold }}
               >
-                {totalSubjectQuestions} Total Qs
+                {countsLoaded ? `${totalSubjectQuestions} Total Qs` : "Loading…"}
               </span>
             </div>
             <p style={{ color: t.textMuted, fontSize: 14 }}>{meta.tag}</p>

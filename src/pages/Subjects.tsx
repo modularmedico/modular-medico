@@ -60,10 +60,14 @@ export default function Subjects() {
     subjectInModuleCounts: {},
     subjectTotalCounts: {},
   });
+  const [countsLoaded, setCountsLoaded] = useState(false);
 
   useEffect(() => {
     const unsubBlocks = subscribeBlockDefinitions(setBlockDefs);
-    const unsubCounts = subscribeCurriculumCounts(setCounts);
+    const unsubCounts = subscribeCurriculumCounts((c) => {
+      setCounts(c);
+      setCountsLoaded(true);
+    });
     const unsubQs = subscribePublishedQuestions((qs) => {
       setAllQuestions(qs);
       setQuestionsLoaded(true);
@@ -257,7 +261,7 @@ export default function Subjects() {
                       marginTop: 2,
                     }}
                   >
-                    {totalInBlock} Qs
+                    {countsLoaded ? `${totalInBlock} Qs` : "Loading…"}
                   </span>
                 </button>
               );
@@ -489,7 +493,7 @@ export default function Subjects() {
                                       color: countInModule > 0 ? t.green : t.textFaint,
                                     }}
                                   >
-                                    {countInModule} Qs
+                                    {countsLoaded ? `${countInModule} Qs` : "Loading…"}
                                   </span>
                                   <ArrowRight size={12} color={t.textFaint} />
                                 </div>
@@ -544,7 +548,7 @@ export default function Subjects() {
                       className="rounded-full px-2.5 py-1 font-mono text-xs font-bold"
                       style={{ backgroundColor: `${t.gold}18`, color: t.gold }}
                     >
-                      {qCount} Qs
+                      {countsLoaded ? `${qCount} Qs` : "Loading…"}
                     </span>
                     <ChevronRight size={16} color={t.textFaint} />
                   </div>
