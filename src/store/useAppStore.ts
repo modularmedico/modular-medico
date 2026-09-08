@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ActiveSetRef, AnswerRecord, PracticeConfig, UserProfile } from "../types";
-import { FREE_BLOCK } from "../data/subjects";
+import { FREE_BLOCKS } from "../data/subjects";
 
 export interface QuizSession {
   setRef: ActiveSetRef;
@@ -150,7 +150,7 @@ export const useIsPremium = () =>
  */
 export const useIsBlockUnlocked = (block: number) =>
   useAppStore((s) => {
-    if (block === FREE_BLOCK) return true;
+    if (FREE_BLOCKS.includes(block)) return true;
     if (s.isAdmin) return true;
     if (s.profile?.premium) {
       if (!s.profile.premiumExpiry || s.profile.premiumExpiry > Date.now()) return true;

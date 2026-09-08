@@ -23,7 +23,7 @@ import {
   SUBJECT_META,
   DEFAULT_BLOCK_DEFINITIONS,
   TOTAL_BLOCKS,
-  FREE_BLOCK,
+  FREE_BLOCKS,
   type BlockDefinition,
   type SubjectId,
 } from "../data/subjects";
@@ -46,7 +46,7 @@ export default function Subjects() {
   const isAdmin = useAppStore((s) => s.isAdmin);
   const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
   const isBlockUnlocked = (block: number) =>
-    block === FREE_BLOCK || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
+    FREE_BLOCKS.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
   const t = isDark ? THEME.dark : THEME.light;
 
   const [selectedBlockNum, setSelectedBlockNum] = useState(1);
@@ -60,14 +60,10 @@ export default function Subjects() {
     subjectInModuleCounts: {},
     subjectTotalCounts: {},
   });
-  const [countsLoaded, setCountsLoaded] = useState(false);
 
   useEffect(() => {
     const unsubBlocks = subscribeBlockDefinitions(setBlockDefs);
-    const unsubCounts = subscribeCurriculumCounts((c) => {
-      setCounts(c);
-      setCountsLoaded(true);
-    });
+    const unsubCounts = subscribeCurriculumCounts(setCounts);
     const unsubQs = subscribePublishedQuestions((qs) => {
       setAllQuestions(qs);
       setQuestionsLoaded(true);
@@ -261,7 +257,7 @@ export default function Subjects() {
                       marginTop: 2,
                     }}
                   >
-                    {countsLoaded ? `${totalInBlock} Qs` : "Loading…"}
+                    {totalInBlock} Qs
                   </span>
                 </button>
               );
@@ -493,7 +489,7 @@ export default function Subjects() {
                                       color: countInModule > 0 ? t.green : t.textFaint,
                                     }}
                                   >
-                                    {countsLoaded ? `${countInModule} Qs` : "Loading…"}
+                                    {countInModule} Qs
                                   </span>
                                   <ArrowRight size={12} color={t.textFaint} />
                                 </div>
@@ -548,7 +544,7 @@ export default function Subjects() {
                       className="rounded-full px-2.5 py-1 font-mono text-xs font-bold"
                       style={{ backgroundColor: `${t.gold}18`, color: t.gold }}
                     >
-                      {countsLoaded ? `${qCount} Qs` : "Loading…"}
+                      {qCount} Qs
                     </span>
                     <ChevronRight size={16} color={t.textFaint} />
                   </div>

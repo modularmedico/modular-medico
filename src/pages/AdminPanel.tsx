@@ -47,7 +47,7 @@ import {
   SUBJECT_META,
   MASTER_MODULES,
   TOTAL_BLOCKS,
-  FREE_BLOCK,
+  FREE_BLOCKS,
   type SubjectId,
 } from "../data/subjects";
 import {
@@ -3363,7 +3363,7 @@ export default function AdminPanel() {
                 <p className="mt-1 text-xs" style={{ color: t.textMuted }}>
                   Grant a student access to specific Blocks without making their whole account
                   premium, or toggle full Premium (all Blocks 1&ndash;{TOTAL_BLOCKS}) directly.
-                  Block {FREE_BLOCK} is always free for everyone and isn&rsquo;t shown here.
+                  Blocks {FREE_BLOCKS.join(" & ")} are always free for everyone and aren&rsquo;t shown here.
                 </p>
               </div>
             </div>
@@ -3449,7 +3449,7 @@ export default function AdminPanel() {
                       </label>
                       <div className="flex flex-wrap gap-1.5">
                         {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1)
-                          .filter((b) => b !== FREE_BLOCK)
+                          .filter((b) => !FREE_BLOCKS.includes(b))
                           .map((b) => {
                             const on = unlockedSet.has(b);
                             return (

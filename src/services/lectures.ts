@@ -1,6 +1,7 @@
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import type { FirestoreLecture, QuestionStatus } from "../types";
+import { cacheFirstSnapshot } from "../utils/localCache";
 
 /**
  * Lectures service — mirrors the `questions` service in adminContent.ts, including the
@@ -181,23 +182,29 @@ export function subscribeAllLectures(
 
 /** Live view of every *published* lecture — safe for students/guests. */
 export function subscribePublishedLectures(cb: (lectures: FirestoreLecture[]) => void) {
-  const q = query(collection(db, "lectures"), where("status", "==", "published"));
-  return onSnapshot(
-    q,
-    (snap) => {
-      const deleted = getDeletedLectureIds();
-      const fsLectures = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreLecture, "id">) }))
-        .filter((fl) => !deleted.has(fl.id.toLowerCase().trim()));
-      const localLectures = getLocalLectures().filter((l) => l.status === "published");
-      const byId = new Map<string, FirestoreLecture>();
-      localLectures.forEach((l) => byId.set(l.id, l));
-      fsLectures.forEach((l) => byId.set(l.id, l));
-      cb(Array.from(byId.values()));
+  return cacheFirstSnapshot(
+    "publishedLectures",
+    (innerCb) => {
+      const q = query(collection(db, "lectures"), where("status", "==", "published"));
+      return onSnapshot(
+        q,
+        (snap) => {
+          const deleted = getDeletedLectureIds();
+          const fsLectures = snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreLecture, "id">) }))
+            .filter((fl) => !deleted.has(fl.id.toLowerCase().trim()));
+          const localLectures = getLocalLectures().filter((l) => l.status === "published");
+          const byId = new Map<string, FirestoreLecture>();
+          localLectures.forEach((l) => byId.set(l.id, l));
+          fsLectures.forEach((l) => byId.set(l.id, l));
+          innerCb(Array.from(byId.values()));
+        },
+        (err) => {
+          console.warn("Firestore published lectures fallback:", err.message);
+          innerCb(getLocalLectures().filter((l) => l.status === "published"));
+        }
+      );
     },
-    (err) => {
-      console.warn("Firestore published lectures fallback:", err.message);
-      cb(getLocalLectures().filter((l) => l.status === "published"));
-    }
+    cb
   );
 }

@@ -2,6 +2,7 @@ import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where
 import { db } from "../firebase";
 import type { FirestoreStudyNote, QuestionStatus } from "../types";
 import { extractDriveFileId } from "./ospeBooks";
+import { cacheFirstSnapshot } from "../utils/localCache";
 
 /**
  * Books & Study Notes service — mirrors the `ospeBooks` service, including the
@@ -167,23 +168,29 @@ export function subscribeAllStudyNotes(
 
 /** Live view of every *published* Study Note — safe for students/guests. */
 export function subscribePublishedStudyNotes(cb: (notes: FirestoreStudyNote[]) => void) {
-  const q = query(collection(db, "study_notes"), where("status", "==", "published"));
-  return onSnapshot(
-    q,
-    (snap) => {
-      const deleted = getDeletedStudyNoteIds();
-      const fsNotes = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreStudyNote, "id">) }))
-        .filter((fn) => !deleted.has(fn.id.toLowerCase().trim()));
-      const localNotes = getLocalStudyNotes().filter((n) => n.status === "published");
-      const byId = new Map<string, FirestoreStudyNote>();
-      localNotes.forEach((n) => byId.set(n.id, n));
-      fsNotes.forEach((n) => byId.set(n.id, n));
-      cb(Array.from(byId.values()));
+  return cacheFirstSnapshot(
+    "publishedStudyNotes",
+    (innerCb) => {
+      const q = query(collection(db, "study_notes"), where("status", "==", "published"));
+      return onSnapshot(
+        q,
+        (snap) => {
+          const deleted = getDeletedStudyNoteIds();
+          const fsNotes = snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreStudyNote, "id">) }))
+            .filter((fn) => !deleted.has(fn.id.toLowerCase().trim()));
+          const localNotes = getLocalStudyNotes().filter((n) => n.status === "published");
+          const byId = new Map<string, FirestoreStudyNote>();
+          localNotes.forEach((n) => byId.set(n.id, n));
+          fsNotes.forEach((n) => byId.set(n.id, n));
+          innerCb(Array.from(byId.values()));
+        },
+        (err) => {
+          console.warn("Firestore published Study Notes fallback:", err.message);
+          innerCb(getLocalStudyNotes().filter((n) => n.status === "published"));
+        }
+      );
     },
-    (err) => {
-      console.warn("Firestore published Study Notes fallback:", err.message);
-      cb(getLocalStudyNotes().filter((n) => n.status === "published"));
-    }
+    cb
   );
 }

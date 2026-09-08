@@ -20,8 +20,10 @@ export type SubjectId = typeof SUBJECT_LIST[number];
 
 export const TOTAL_BLOCKS = 15;
 
-/** The one Block that stays free for everyone; every other Block requires a paid pass. */
-export const FREE_BLOCK = 3;
+/** The Blocks that stay free for everyone; every other Block requires a paid pass. */
+export const FREE_BLOCKS: number[] = [3, 8];
+/** @deprecated kept for any lingering references — prefer FREE_BLOCKS.includes(block) */
+export const FREE_BLOCK = FREE_BLOCKS[0];
 
 export const SUBJECT_META: Record<SubjectId, { label: string; tag: string; short: string; defaultYear: string }> = {
   gross_anatomy: { label: "Gross Anatomy", tag: "Structures, Organs & Bones", short: "GA", defaultYear: "1st Year" },

@@ -15,6 +15,7 @@ import { db } from "../firebase";
 import { DEFAULT_MODULES, DEFAULT_QUESTIONS } from "../data/defaultCurriculum";
 import { DEFAULT_BLOCK_DEFINITIONS, type BlockDefinition } from "../data/subjects";
 import type { Difficulty, FirestoreQuestion, ModuleDoc, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
+import { cacheFirstFetch, cacheFirstSnapshot, ONE_HOUR } from "../utils/localCache";
 
 const LOCAL_MODULES_KEY = "modular_medico_custom_modules";
 const LOCAL_BLOCKS_KEY = "modular_medico_custom_blocks";
@@ -150,6 +151,11 @@ function setLocalSubjectModules(subjectId: string, modules: ModuleDoc[]) {
 export function subscribeModules(subjectId: string, cb: (modules: ModuleDoc[]) => void) {
   const local = getLocalSubjectModules(subjectId);
   const fallback = local || DEFAULT_MODULES[subjectId] || [];
+
+  // Show the last-cached list immediately instead of waiting on the network,
+  // so repeat visits don't sit on a "Loading modules…" spinner. The live
+  // Firestore listener below still runs and refreshes this the moment it responds.
+  if (local) cb(local);
 
   const q = query(collection(db, "modules"), where("subjectId", "==", subjectId));
   return onSnapshot(
@@ -916,8 +922,20 @@ export function subscribeScopedQuestions(
   );
 }
 
-/** One-time fetch of published questions for a practice session */
+/** One-time fetch of published questions for a practice session (cached for a fast repeat load). */
 export async function fetchPublishedBlock(
+  subjectId: string,
+  moduleId?: string,
+  block?: number,
+  difficulty?: Difficulty | "all",
+  topicId?: string | null,
+  topicName?: string | null
+): Promise<FirestoreQuestion[]> {
+  const cacheKey = `pubBlock_${subjectId}_${moduleId ?? ""}_${block ?? ""}_${difficulty ?? ""}_${topicId ?? ""}_${topicName ?? ""}`;
+  return cacheFirstFetch(cacheKey, () => fetchPublishedBlockUncached(subjectId, moduleId, block, difficulty, topicId, topicName), ONE_HOUR);
+}
+
+async function fetchPublishedBlockUncached(
   subjectId: string,
   moduleId?: string,
   block?: number,
@@ -1000,8 +1018,19 @@ export async function fetchPublishedBlock(
   );
 }
 
-/** One-time fetch of all published questions for a specific Module across all subjects */
+/** One-time fetch of all published questions for a specific Module across all subjects (cached for a fast repeat load). */
 export async function fetchPublishedModuleExam(
+  block: number,
+  moduleId: string,
+  difficulty?: Difficulty | "all",
+  topicName?: string | null,
+  subjectId?: string | null
+): Promise<FirestoreQuestion[]> {
+  const cacheKey = `pubModuleExam_${block}_${moduleId}_${difficulty ?? ""}_${topicName ?? ""}_${subjectId ?? ""}`;
+  return cacheFirstFetch(cacheKey, () => fetchPublishedModuleExamUncached(block, moduleId, difficulty, topicName, subjectId), ONE_HOUR);
+}
+
+async function fetchPublishedModuleExamUncached(
   block: number,
   moduleId: string,
   difficulty?: Difficulty | "all",
@@ -1067,8 +1096,16 @@ export async function fetchPublishedModuleExam(
   );
 }
 
-/** One-time fetch of all published questions for an entire Block across all subjects */
+/** One-time fetch of all published questions for an entire Block across all subjects (cached for a fast repeat load). */
 export async function fetchPublishedBlockExam(
+  block: number,
+  difficulty?: Difficulty | "all"
+): Promise<FirestoreQuestion[]> {
+  const cacheKey = `pubBlockExam_${block}_${difficulty ?? ""}`;
+  return cacheFirstFetch(cacheKey, () => fetchPublishedBlockExamUncached(block, difficulty), ONE_HOUR);
+}
+
+async function fetchPublishedBlockExamUncached(
   block: number,
   difficulty?: Difficulty | "all"
 ): Promise<FirestoreQuestion[]> {
@@ -1179,34 +1216,45 @@ export function subscribeModuleBlockCounts(subjectId: string, moduleId: string, 
  * breakdowns (only the admin Manage MCQs & Bank screen should).
  */
 export function subscribePublishedQuestions(cb: (questions: FirestoreQuestion[]) => void) {
-  const q = query(collection(db, "questions"), where("status", "==", "published"));
-  return onSnapshot(
-    q,
-    (snap) => {
-      const deleted = getDeletedQuestionIds();
-      const fsQuestions = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
-        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
-      const localQs = getLocalQuestions().filter(
-        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim())
-      );
-      const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim())
-      );
+  // This scans the entire published question bank, which is by far the slowest
+  // query in the app — it's what makes "Loading modules…" take a while the first
+  // time. cacheFirstSnapshot shows whatever was cached from the last visit
+  // instantly, then swaps in the live result (and refreshes the cache) once
+  // Firestore responds, so only the very first-ever load pays the full wait.
+  return cacheFirstSnapshot(
+    "publishedQuestions",
+    (innerCb) => {
+      const q = query(collection(db, "questions"), where("status", "==", "published"));
+      return onSnapshot(
+        q,
+        (snap) => {
+          const deleted = getDeletedQuestionIds();
+          const fsQuestions = snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
+            .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
+          const localQs = getLocalQuestions().filter(
+            (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim())
+          );
+          const defQuestions = DEFAULT_QUESTIONS.filter(
+            (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim())
+          );
 
-      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
+          innerCb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
+        },
+        (err) => {
+          console.warn("Firestore published questions fallback:", err.message);
+          const deleted = getDeletedQuestionIds();
+          const localQs = getLocalQuestions().filter(
+            (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim())
+          );
+          const defQuestions = DEFAULT_QUESTIONS.filter(
+            (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim())
+          );
+          innerCb(mergeQuestionSources(defQuestions, localQs, []));
+        }
+      );
     },
-    (err) => {
-      console.warn("Firestore published questions fallback:", err.message);
-      const deleted = getDeletedQuestionIds();
-      const localQs = getLocalQuestions().filter(
-        (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim())
-      );
-      const defQuestions = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim())
-      );
-      cb(mergeQuestionSources(defQuestions, localQs, []));
-    }
+    cb
   );
 }
 
@@ -1219,6 +1267,10 @@ export interface CurriculumCounts {
 
 /** Live published-question counts across the entire curriculum hierarchy (Block -> Module -> Subject) */
 export function subscribeCurriculumCounts(cb: (counts: CurriculumCounts) => void) {
+  return cacheFirstSnapshot("curriculumCounts", (innerCb) => subscribeCurriculumCountsLive(innerCb), cb);
+}
+
+function subscribeCurriculumCountsLive(cb: (counts: CurriculumCounts) => void) {
   const q = query(collection(db, "questions"), where("status", "==", "published"));
   return onSnapshot(
     q,

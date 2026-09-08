@@ -11,7 +11,7 @@ import {
   SUBJECT_LIST,
   SUBJECT_META,
   DEFAULT_BLOCK_DEFINITIONS,
-  FREE_BLOCK,
+  FREE_BLOCKS,
   type SubjectId,
   type BlockDefinition,
 } from "../data/subjects";
@@ -32,7 +32,7 @@ export default function SubjectDetail() {
   const isAdmin = useAppStore((s) => s.isAdmin);
   const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
   const isBlockUnlocked = (block: number) =>
-    block === FREE_BLOCK || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
+    FREE_BLOCKS.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
   const t = isDark ? THEME.dark : THEME.light;
   const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
   const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);
@@ -44,17 +44,8 @@ export default function SubjectDetail() {
     subjectTotalCounts: {},
   });
 
-  const [countsLoaded, setCountsLoaded] = useState(false);
-
   useEffect(() => subscribeBlockDefinitions(setBlockDefs), []);
-  useEffect(
-    () =>
-      subscribeCurriculumCounts((c) => {
-        setCounts(c);
-        setCountsLoaded(true);
-      }),
-    []
-  );
+  useEffect(() => subscribeCurriculumCounts(setCounts), []);
   useEffect(
     () =>
       subscribePublishedQuestions((qs) => {
@@ -144,7 +135,7 @@ export default function SubjectDetail() {
                 className="rounded-full px-2.5 py-0.5 font-mono text-xs font-bold"
                 style={{ backgroundColor: `${t.gold}20`, color: t.gold }}
               >
-                {countsLoaded ? `${totalSubjectQuestions} Total Qs` : "Loading…"}
+                {totalSubjectQuestions} Total Qs
               </span>
             </div>
             <p style={{ color: t.textMuted, fontSize: 14 }}>{meta.tag}</p>

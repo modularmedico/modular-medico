@@ -1,6 +1,7 @@
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import type { FirestoreOspeBook, QuestionStatus } from "../types";
+import { cacheFirstSnapshot } from "../utils/localCache";
 
 /**
  * OSPE Books service — mirrors the `lectures` service, including the same
@@ -182,23 +183,29 @@ export function subscribeAllOspeBooks(
 
 /** Live view of every *published* OSPE Book — safe for students/guests. */
 export function subscribePublishedOspeBooks(cb: (books: FirestoreOspeBook[]) => void) {
-  const q = query(collection(db, "ospe_books"), where("status", "==", "published"));
-  return onSnapshot(
-    q,
-    (snap) => {
-      const deleted = getDeletedOspeBookIds();
-      const fsBooks = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreOspeBook, "id">) }))
-        .filter((fb) => !deleted.has(fb.id.toLowerCase().trim()));
-      const localBooks = getLocalOspeBooks().filter((b) => b.status === "published");
-      const byId = new Map<string, FirestoreOspeBook>();
-      localBooks.forEach((b) => byId.set(b.id, b));
-      fsBooks.forEach((b) => byId.set(b.id, b));
-      cb(Array.from(byId.values()));
+  return cacheFirstSnapshot(
+    "publishedOspeBooks",
+    (innerCb) => {
+      const q = query(collection(db, "ospe_books"), where("status", "==", "published"));
+      return onSnapshot(
+        q,
+        (snap) => {
+          const deleted = getDeletedOspeBookIds();
+          const fsBooks = snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreOspeBook, "id">) }))
+            .filter((fb) => !deleted.has(fb.id.toLowerCase().trim()));
+          const localBooks = getLocalOspeBooks().filter((b) => b.status === "published");
+          const byId = new Map<string, FirestoreOspeBook>();
+          localBooks.forEach((b) => byId.set(b.id, b));
+          fsBooks.forEach((b) => byId.set(b.id, b));
+          innerCb(Array.from(byId.values()));
+        },
+        (err) => {
+          console.warn("Firestore published OSPE books fallback:", err.message);
+          innerCb(getLocalOspeBooks().filter((b) => b.status === "published"));
+        }
+      );
     },
-    (err) => {
-      console.warn("Firestore published OSPE books fallback:", err.message);
-      cb(getLocalOspeBooks().filter((b) => b.status === "published"));
-    }
+    cb
   );
 }
