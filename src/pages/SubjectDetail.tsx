@@ -11,7 +11,6 @@ import {
   SUBJECT_LIST,
   SUBJECT_META,
   DEFAULT_BLOCK_DEFINITIONS,
-  FREE_BLOCKS,
   type SubjectId,
   type BlockDefinition,
 } from "../data/subjects";
@@ -31,8 +30,9 @@ export default function SubjectDetail() {
   const isPremium = useIsPremium();
   const isAdmin = useAppStore((s) => s.isAdmin);
   const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
+  const freeBlocks = useAppStore((s) => s.freeBlocks);
   const isBlockUnlocked = (block: number) =>
-    FREE_BLOCKS.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
+    freeBlocks.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
   const t = isDark ? THEME.dark : THEME.light;
   const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
   const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);

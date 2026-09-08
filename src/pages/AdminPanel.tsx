@@ -34,6 +34,8 @@ import {
   FolderTree,
   BarChart3,
   TrendingUp,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Card from "../components/Card";
@@ -47,7 +49,6 @@ import {
   SUBJECT_META,
   MASTER_MODULES,
   TOTAL_BLOCKS,
-  FREE_BLOCKS,
   type SubjectId,
 } from "../data/subjects";
 import {
@@ -67,6 +68,8 @@ import {
   subscribeAllUsers,
   setUserUnlockedBlocks,
   setUserPremium,
+  subscribeFreeBlocks,
+  saveFreeBlocks,
   QuestionSaveError,
 } from "../services/adminContent";
 import {
@@ -137,6 +140,46 @@ export default function AdminPanel() {
   // independently without disabling the whole list.
   const [accessSaving, setAccessSaving] = useState<Record<string, boolean>>({});
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
+
+  // Which Blocks are free for everyone — editable here instead of being a
+  // hardcoded constant. Backed by services/adminContent.ts's
+  // subscribeFreeBlocks()/saveFreeBlocks() (Firestore doc settings/freeBlocks).
+  const [freeBlocks, setFreeBlocksLocal] = useState<number[]>([]);
+  const [freeBlocksLoading, setFreeBlocksLoading] = useState(true);
+  const [freeBlocksSaving, setFreeBlocksSaving] = useState(false);
+  const storeSetFreeBlocks = useAppStore((s) => s.setFreeBlocks);
+
+  useEffect(() => {
+    if (activeTab !== "manage_access") return;
+    setFreeBlocksLoading(true);
+    const unsub = subscribeFreeBlocks((blocks) => {
+      setFreeBlocksLocal(blocks);
+      setFreeBlocksLoading(false);
+    });
+    return unsub;
+  }, [activeTab]);
+
+  // Toggle one Block's free/paywalled status. Optimistically flips the
+  // checkbox, then persists the whole next array to Firestore, then updates
+  // the shared store so every open tab reflects the change immediately.
+  const handleToggleFreeBlock = async (block: number) => {
+    const next = freeBlocks.includes(block)
+      ? freeBlocks.filter((b) => b !== block)
+      : [...freeBlocks, block].sort((a, b) => a - b);
+    setFreeBlocksLocal(next);
+    setFreeBlocksSaving(true);
+    try {
+      await saveFreeBlocks(next);
+      storeSetFreeBlocks(next);
+      setAccessNotice(`Block ${block} is now ${next.includes(block) ? "free for everyone" : "back behind the paywall"}.`);
+    } catch (err) {
+      console.warn("Failed to save free blocks:", err);
+      setAccessNotice("Couldn't save that change — check your connection and try again.");
+      setFreeBlocksLocal(freeBlocks); // revert optimistic update
+    } finally {
+      setFreeBlocksSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (activeTab !== "manage_access") return;
@@ -3355,6 +3398,54 @@ export default function AdminPanel() {
         <div className="flex flex-col gap-5">
           <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
             <div className="flex items-start gap-3">
+              {freeBlocksLoading ? (
+                <Loader2 size={18} className="animate-spin mt-0.5 shrink-0" color={t.purple} />
+              ) : (
+                <Unlock size={18} color={t.purple} className="mt-0.5 shrink-0" />
+              )}
+              <div className="flex-1">
+                <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
+                  Free Blocks (Paywall Control)
+                </h2>
+                <p className="mt-1 text-xs" style={{ color: t.textMuted }}>
+                  Tap a Block to toggle whether it&rsquo;s free for everyone or requires Premium /
+                  a manual unlock. Changes apply instantly for every student.
+                </p>
+              </div>
+            </div>
+
+            {freeBlocksLoading ? (
+              <div className="mt-4 py-6 text-center">
+                <Spinner t={t} size={20} label="Loading paywall settings\u2026" />
+              </div>
+            ) : (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1).map((b) => {
+                  const isFree = freeBlocks.includes(b);
+                  return (
+                    <button
+                      key={b}
+                      onClick={() => handleToggleFreeBlock(b)}
+                      disabled={freeBlocksSaving}
+                      title={isFree ? `Block ${b} is free — tap to paywall it` : `Block ${b} is paywalled — tap to make it free`}
+                      className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-all disabled:opacity-50"
+                      style={{
+                        backgroundColor: isFree ? `${t.green}1f` : t.surfaceAlt,
+                        border: `1.5px solid ${isFree ? t.green : t.border}`,
+                        color: isFree ? t.green : t.textMuted,
+                      }}
+                    >
+                      {isFree ? <Unlock size={12} /> : <Lock size={12} />}
+                      Block {b}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-start gap-3">
               <Users size={18} color={t.purple} className="mt-0.5 shrink-0" />
               <div>
                 <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
@@ -3363,7 +3454,9 @@ export default function AdminPanel() {
                 <p className="mt-1 text-xs" style={{ color: t.textMuted }}>
                   Grant a student access to specific Blocks without making their whole account
                   premium, or toggle full Premium (all Blocks 1&ndash;{TOTAL_BLOCKS}) directly.
-                  Blocks {FREE_BLOCKS.join(" & ")} are always free for everyone and aren&rsquo;t shown here.
+                  {freeBlocks.length > 0
+                    ? ` Blocks ${freeBlocks.join(" & ")} are always free for everyone and aren\u2019t shown here.`
+                    : " No Blocks are currently free for everyone — set that above."}
                 </p>
               </div>
             </div>
@@ -3449,7 +3542,7 @@ export default function AdminPanel() {
                       </label>
                       <div className="flex flex-wrap gap-1.5">
                         {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1)
-                          .filter((b) => !FREE_BLOCKS.includes(b))
+                          .filter((b) => !freeBlocks.includes(b))
                           .map((b) => {
                             const on = unlockedSet.has(b);
                             return (

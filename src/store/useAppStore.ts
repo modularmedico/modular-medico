@@ -40,6 +40,13 @@ interface AppState {
   exitAdmin: () => void;
   unlockFreePremium: () => void;
 
+  // Which Blocks are free for everyone — defaults to the FREE_BLOCKS constant
+  // and is kept live by subscribeFreeBlocks() in App.tsx once Firestore's
+  // settings/freeBlocks doc loads, so an admin's toggle takes effect for
+  // everyone without a redeploy.
+  freeBlocks: number[];
+  setFreeBlocks: (blocks: number[]) => void;
+
   session: QuizSession | null;
   startSession: (setRef: ActiveSetRef, config: PracticeConfig) => void;
   updateSession: (patch: Partial<QuizSession>) => void;
@@ -90,6 +97,9 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      freeBlocks: FREE_BLOCKS,
+      setFreeBlocks: (blocks) => set({ freeBlocks: blocks }),
+
       session: null,
       startSession: (setRef, config) =>
         set({
@@ -123,6 +133,7 @@ export const useAppStore = create<AppState>()(
         email: s.email,
         displayName: s.displayName,
         profile: s.profile,
+        freeBlocks: s.freeBlocks,
         session: s.session,
         lastResult: s.lastResult,
       }),
@@ -150,7 +161,7 @@ export const useIsPremium = () =>
  */
 export const useIsBlockUnlocked = (block: number) =>
   useAppStore((s) => {
-    if (FREE_BLOCKS.includes(block)) return true;
+    if (s.freeBlocks.includes(block)) return true;
     if (s.isAdmin) return true;
     if (s.profile?.premium) {
       if (!s.profile.premiumExpiry || s.profile.premiumExpiry > Date.now()) return true;

@@ -94,6 +94,17 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
+    // App-wide settings, e.g. settings/freeBlocks ({ blocks: number[] }),
+    // which Blocks are free for everyone. Readable by anyone (guests need
+    // it to know which Blocks to unlock), writable only by admins — edited
+    // from the "Manage Access" tab's Free Blocks toggle grid.
+    // ---------------------------------------------------------------
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------
     // Site visit counters (see src/services/siteStats.ts). Writes don't
     // require auth (guests/students visiting the site trigger these), but
     // each write may only ever move a counter forward by exactly 1 — never

@@ -9,11 +9,12 @@ import {
   where,
   orderBy,
   getDocs,
+  setDoc,
   writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { DEFAULT_MODULES, DEFAULT_QUESTIONS } from "../data/defaultCurriculum";
-import { DEFAULT_BLOCK_DEFINITIONS, type BlockDefinition } from "../data/subjects";
+import { DEFAULT_BLOCK_DEFINITIONS, FREE_BLOCKS as DEFAULT_FREE_BLOCKS, type BlockDefinition } from "../data/subjects";
 import type { Difficulty, FirestoreQuestion, ModuleDoc, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 import { cacheFirstFetch, cacheFirstSnapshot, ONE_HOUR } from "../utils/localCache";
 
@@ -21,6 +22,62 @@ const LOCAL_MODULES_KEY = "modular_medico_custom_modules";
 const LOCAL_BLOCKS_KEY = "modular_medico_custom_blocks";
 const LOCAL_SUBHEADINGS_KEY = "modular_medico_subheadings";
 const LOCAL_TOPICS_KEY = "modular_medico_topics";
+const LOCAL_FREE_BLOCKS_KEY = "modular_medico_free_blocks";
+
+/**
+ * Which Blocks are free for everyone, stored in a single Firestore doc
+ * (`settings/freeBlocks`) so an admin can toggle them at runtime from the
+ * "Manage Access" tab instead of it being a hardcoded constant. Falls back to
+ * the localStorage cache, then to the DEFAULT_FREE_BLOCKS constant, if
+ * Firestore is unreachable or the doc doesn't exist yet.
+ */
+function getLocalFreeBlocks(): number[] | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_FREE_BLOCKS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function setLocalFreeBlocks(blocks: number[]) {
+  try {
+    localStorage.setItem(LOCAL_FREE_BLOCKS_KEY, JSON.stringify(blocks));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live view of which Blocks are currently free for everyone. */
+export function subscribeFreeBlocks(cb: (blocks: number[]) => void) {
+  const fallback = getLocalFreeBlocks() || DEFAULT_FREE_BLOCKS;
+  const ref = doc(db, "settings", "freeBlocks");
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as { blocks?: number[] };
+        const blocks = Array.isArray(data.blocks) ? data.blocks : fallback;
+        setLocalFreeBlocks(blocks);
+        cb(blocks);
+      } else {
+        cb(fallback);
+      }
+    },
+    (err) => {
+      console.warn("Firestore freeBlocks fallback:", err.message);
+      cb(fallback);
+    }
+  );
+}
+
+/** Admin action: set the full list of Blocks that should be free for everyone. */
+export async function saveFreeBlocks(blocks: number[]): Promise<void> {
+  const cleaned = Array.from(new Set(blocks)).sort((a, b) => a - b);
+  setLocalFreeBlocks(cleaned);
+  await setDoc(doc(db, "settings", "freeBlocks"), { blocks: cleaned });
+}
 
 /**
  * Merge questions from the three sources (built-in defaults, locally-cached

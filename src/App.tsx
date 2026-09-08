@@ -24,6 +24,7 @@ import Paywall from "./pages/Paywall";
 import NotFound from "./pages/NotFound";
 import { subscribeAuth } from "./services/auth";
 import { subscribeUserProfile } from "./services/firestore";
+import { subscribeFreeBlocks } from "./services/adminContent";
 import { useAppStore } from "./store/useAppStore";
 import { initAnalytics } from "./firebase";
 import { trackVisit } from "./services/siteStats";
@@ -40,6 +41,7 @@ export default function App() {
   const setAuthUser = useAppStore((s) => s.setAuthUser);
   const setProfile = useAppStore((s) => s.setProfile);
   const setAuthReady = useAppStore((s) => s.setAuthReady);
+  const setFreeBlocks = useAppStore((s) => s.setFreeBlocks);
   const uid = useAppStore((s) => s.uid);
 
   useEffect(() => {
@@ -48,6 +50,14 @@ export default function App() {
     // Best-effort and silent — never blocks or affects the rest of the app.
     trackVisit();
   }, []);
+
+  // Keep which Blocks are free live for the lifetime of the app, so an
+  // admin's toggle on the "Manage Access" tab takes effect immediately for
+  // every open tab/session without needing a redeploy.
+  useEffect(() => {
+    const unsub = subscribeFreeBlocks(setFreeBlocks);
+    return unsub;
+  }, [setFreeBlocks]);
 
   // Keep the store in sync with Firebase Auth for the lifetime of the app.
   useEffect(() => {

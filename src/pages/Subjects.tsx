@@ -23,7 +23,6 @@ import {
   SUBJECT_META,
   DEFAULT_BLOCK_DEFINITIONS,
   TOTAL_BLOCKS,
-  FREE_BLOCKS,
   type BlockDefinition,
   type SubjectId,
 } from "../data/subjects";
@@ -45,8 +44,9 @@ export default function Subjects() {
   const isPremium = useIsPremium();
   const isAdmin = useAppStore((s) => s.isAdmin);
   const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
+  const freeBlocks = useAppStore((s) => s.freeBlocks);
   const isBlockUnlocked = (block: number) =>
-    FREE_BLOCKS.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
+    freeBlocks.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
   const t = isDark ? THEME.dark : THEME.light;
 
   const [selectedBlockNum, setSelectedBlockNum] = useState(1);
