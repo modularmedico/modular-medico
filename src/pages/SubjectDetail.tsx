@@ -135,7 +135,7 @@ export default function SubjectDetail() {
                 className="rounded-full px-2.5 py-0.5 font-mono text-xs font-bold"
                 style={{ backgroundColor: `${t.gold}20`, color: t.gold }}
               >
-                {totalSubjectQuestions} Total Qs
+                {questionsLoaded ? `${totalSubjectQuestions} Total Qs` : "Loading\u2026"}
               </span>
             </div>
             <p style={{ color: t.textMuted, fontSize: 14 }}>{meta.tag}</p>

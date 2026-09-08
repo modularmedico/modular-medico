@@ -257,7 +257,7 @@ export default function Subjects() {
                       marginTop: 2,
                     }}
                   >
-                    {totalInBlock} Qs
+                    {questionsLoaded ? `${totalInBlock} Qs` : "Loading\u2026"}
                   </span>
                 </button>
               );
@@ -296,7 +296,7 @@ export default function Subjects() {
                     className="rounded-full px-3 py-1 font-mono text-xs font-bold"
                     style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}
                   >
-                    {totalQuestionsInSelectedBlock} Questions
+                    {questionsLoaded ? `${totalQuestionsInSelectedBlock} Questions` : "Loading\u2026"}
                   </span>
                 </div>
 
@@ -544,7 +544,7 @@ export default function Subjects() {
                       className="rounded-full px-2.5 py-1 font-mono text-xs font-bold"
                       style={{ backgroundColor: `${t.gold}18`, color: t.gold }}
                     >
-                      {qCount} Qs
+                      {questionsLoaded ? `${qCount} Qs` : "Loading\u2026"}
                     </span>
                     <ChevronRight size={16} color={t.textFaint} />
                   </div>
