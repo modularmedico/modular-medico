@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import Logomark from "./Logomark";
 import Footer from "./Footer";
+import BlocksOfferModal from "./BlocksOfferModal";
 import { THEME, FONT_DISPLAY, FONT_BODY } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import { logOut as firebaseLogOut } from "../services/auth";
@@ -110,6 +111,9 @@ export default function Shell() {
 
   return (
     <div style={{ backgroundColor: t.bg, color: t.text, fontFamily: FONT_BODY, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      {/* Promo popup: "3 blocks for PKR 499" via WhatsApp — shows on every page load */}
+      <BlocksOfferModal />
+
       {/* Dynamic Auto-Fading Top Scroll Progress Bar */}
       <div
         className="fixed top-0 left-0 right-0 z-50 h-[3px] pointer-events-none transition-opacity duration-500 ease-out"
