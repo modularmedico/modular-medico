@@ -81,6 +81,92 @@ export async function saveFreeBlocks(blocks: number[]): Promise<void> {
   await setDoc(doc(db, "settings", "freeBlocks"), { blocks: cleaned });
 }
 
+/* ------------------- Free subjects inside paid blocks ------------------- */
+
+/**
+ * Per-block list of subject ids that stay FREE even though the block itself is
+ * paywalled. Stored in one Firestore doc (`settings/freeSubjects`) shaped as
+ * `{ map: { "1": ["anatomy", "physiology"], "2": [...] } }`.
+ * A block that is already fully free (freeBlocks) ignores this.
+ */
+export type FreeSubjectsMap = Record<number, string[]>;
+
+const LOCAL_FREE_SUBJECTS_KEY = "modular_medico_free_subjects";
+
+function normalizeFreeSubjects(raw: unknown): FreeSubjectsMap {
+  const out: FreeSubjectsMap = {};
+  if (raw && typeof raw === "object") {
+    Object.entries(raw as Record<string, unknown>).forEach(([k, v]) => {
+      const block = Number(k);
+      if (Number.isFinite(block) && Array.isArray(v) && v.length) {
+        out[block] = Array.from(new Set(v.map(String)));
+      }
+    });
+  }
+  return out;
+}
+
+function getLocalFreeSubjects(): FreeSubjectsMap {
+  try {
+    const raw = localStorage.getItem(LOCAL_FREE_SUBJECTS_KEY);
+    if (raw) return normalizeFreeSubjects(JSON.parse(raw));
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function setLocalFreeSubjects(map: FreeSubjectsMap) {
+  try {
+    localStorage.setItem(LOCAL_FREE_SUBJECTS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live view of which subjects are free inside each (paid) block. */
+export function subscribeFreeSubjects(cb: (map: FreeSubjectsMap) => void) {
+  const fallback = getLocalFreeSubjects();
+  return onSnapshot(
+    doc(db, "settings", "freeSubjects"),
+    (snap) => {
+      if (snap.exists()) {
+        const map = normalizeFreeSubjects((snap.data() as { map?: unknown }).map);
+        setLocalFreeSubjects(map);
+        cb(map);
+      } else {
+        cb(fallback);
+      }
+    },
+    (err) => {
+      console.warn("Firestore freeSubjects fallback:", err.message);
+      cb(fallback);
+    }
+  );
+}
+
+/** Admin action: replace the free-subject list for ONE block (empty array = all paid). */
+export async function saveBlockFreeSubjects(block: number, subjectIds: string[]): Promise<void> {
+  const next = { ...getLocalFreeSubjects() };
+  if (subjectIds.length) next[block] = Array.from(new Set(subjectIds));
+  else delete next[block];
+  setLocalFreeSubjects(next);
+  // Firestore map keys must be strings.
+  const asStrings: Record<string, string[]> = {};
+  Object.entries(next).forEach(([k, v]) => (asStrings[k] = v));
+  await setDoc(doc(db, "settings", "freeSubjects"), { map: asStrings });
+}
+
+/** True if this subject is free inside this block (used for gating + lock badges). */
+export function isSubjectFree(map: FreeSubjectsMap, block: number, subjectId: string): boolean {
+  return !!map[block]?.includes(subjectId);
+}
+
+/** True if the block has at least one free subject (so the block shows no lock). */
+export function blockHasFreeSubject(map: FreeSubjectsMap, block: number): boolean {
+  return (map[block]?.length ?? 0) > 0;
+}
+
 /**
  * Merge questions from the three sources (built-in defaults, locally-cached
  * drafts, and live Firestore results) into one deduplicated list.

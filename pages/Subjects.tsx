@@ -29,7 +29,11 @@ import {
   subscribeBlockCounts,
   subscribeBlockOutline,
   subscribeSubjectCounts,
+  subscribeFreeSubjects,
+  isSubjectFree,
+  blockHasFreeSubject,
   type BlockOutline,
+  type FreeSubjectsMap,
 } from "../services/adminContent";
 
 export default function Subjects() {
@@ -46,6 +50,16 @@ export default function Subjects() {
   const isBlockUnlocked = (block: number) =>
     freeBlocks.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
   const t = isDark ? THEME.dark : THEME.light;
+
+  // Admin-chosen free subjects inside otherwise paid blocks.
+  const [freeSubjects, setFreeSubjects] = useState<FreeSubjectsMap>({});
+  useEffect(() => subscribeFreeSubjects(setFreeSubjects), []);
+  // A subject is locked only if its block isn't unlocked AND admin hasn't marked it free.
+  const isSubjectLocked = (block: number, subjectId: string) =>
+    !isBlockUnlocked(block) && !isSubjectFree(freeSubjects, block, subjectId);
+  // Block badge: show the lock only when nothing in the block is free.
+  const isBlockBadgeLocked = (block: number) =>
+    !isBlockUnlocked(block) && !blockHasFreeSubject(freeSubjects, block);
 
   const [selectedBlockNum, setSelectedBlockNum] = useState(1);
   const [yearFilter, setYearFilter] = useState<string>("all");
@@ -178,7 +192,7 @@ export default function Subjects() {
             {filteredBlockDefs.map((b) => {
               const totalInBlock = outlines[b.block]?.total ?? blockCounts?.[b.block] ?? 0;
               const isSelected = selectedBlockNum === b.block;
-              const isLocked = !isBlockUnlocked(b.block);
+              const isLocked = isBlockBadgeLocked(b.block);
 
               return (
                 <button
@@ -293,10 +307,12 @@ export default function Subjects() {
                     )
                   }
                 >
-                  {currentBlockLocked ? "Unlock Block" : `Start Block ${currentBlockDef.block} Exam`}
+                  {currentBlockLocked ? `Unlock Block ${currentBlockDef.block}` : `Start Block ${currentBlockDef.block} Exam`}
                 </Btn>
                 <span className="text-center text-[11px]" style={{ color: t.textFaint }}>
-                  Full multi-module exam
+                  {currentBlockLocked && blockHasFreeSubject(freeSubjects, currentBlockDef.block)
+                    ? "Some subjects in this block are free"
+                    : "Full multi-module exam"}
                 </span>
               </div>
             </div>
@@ -338,6 +354,8 @@ export default function Subjects() {
               <div className="flex flex-col gap-4">
                 {displayModules.map((mod, modIdx) => {
                   const modQuestions = mod.total;
+                  // Whole-module practice needs every subject in it to be accessible.
+                  const modLocked = mod.subjects.some((sj) => isSubjectLocked(currentBlockDef.block, sj.subjectId));
 
                   return (
                     <div
@@ -380,19 +398,19 @@ export default function Subjects() {
                           <button
                             onClick={() =>
                               navigate(
-                                currentBlockLocked
+                                modLocked
                                   ? (isLoggedIn ? "/paywall" : "/signup")
                                   : `/subjects/all/${mod.id}/${currentBlockDef.block}`
                               )
                             }
                             className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all hover:scale-[1.02]"
                             style={{
-                              backgroundColor: currentBlockLocked ? t.gold : t.purpleStrong,
+                              backgroundColor: modLocked ? t.gold : t.purpleStrong,
                               color: "#fff",
                             }}
                           >
-                            {currentBlockLocked ? <Lock size={13} fill="#fff" /> : <Play size={13} fill="#fff" />}
-                            {currentBlockLocked ? "Unlock Module" : `Practice Module`}
+                            {modLocked ? <Lock size={13} fill="#fff" /> : <Play size={13} fill="#fff" />}
+                            {modLocked ? "Unlock Module" : `Practice Module`}
                           </button>
                         </div>
                       </div>
@@ -404,13 +422,15 @@ export default function Subjects() {
                             const subjId = subjectId as SubjectId;
                             const meta = SUBJECT_META[subjId] || { label: subjId, tag: "MBBS" };
                             const color = t.teal;
+                            const subjLocked = isSubjectLocked(currentBlockDef.block, subjId);
+                            const subjFree = currentBlockLocked && !subjLocked;
 
                             return (
                               <div
                                 key={subjId}
                                 onClick={() =>
                                   navigate(
-                                    currentBlockLocked
+                                    subjLocked
                                       ? (isLoggedIn ? "/paywall" : "/signup")
                                       : `/subjects/${subjId}/${mod.id}/${currentBlockDef.block}`
                                   )
@@ -425,7 +445,7 @@ export default function Subjects() {
                                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl relative"
                                   style={{ backgroundColor: `${color}22` }}
                                 >
-                                  {currentBlockLocked && (
+                                  {subjLocked && (
                                     <div
                                       className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full shadow-sm"
                                       style={{ backgroundColor: t.gold, color: "#241A08" }}
@@ -441,6 +461,14 @@ export default function Subjects() {
                                   </span>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1.5">
+                                  {subjFree && (
+                                    <span
+                                      className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                                      style={{ backgroundColor: `${t.teal}22`, color: t.teal }}
+                                    >
+                                      FREE
+                                    </span>
+                                  )}
                                   <span
                                     className="rounded-full px-2 py-0.5 font-mono text-[10px] font-bold"
                                     style={{
