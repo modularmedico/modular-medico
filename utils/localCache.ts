@@ -152,3 +152,35 @@ export function cacheFirstSnapshot<T>(
     cb(data);
   });
 }
+
+/**
+ * Cache-then-network helper for lightweight index data (counts, outlines).
+ *  - If a cached value exists it is delivered to `cb` immediately (no spinner).
+ *  - The fetcher then runs (concurrent callers share one request) and its fresh result is
+ *    cached and delivered to `cb` too, so the UI corrects itself a moment later.
+ *  - If the fetch fails, nothing is cached; `fallback` (if given) is shown only when there
+ *    was no cached value to keep showing.
+ * Returns an unsubscribe function that stops any further `cb` calls.
+ */
+export function cacheThenFetch<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  cb: (data: T) => void,
+  fallback?: () => T,
+  ttlMs: number = 7 * ONE_DAY
+): () => void {
+  let cancelled = false;
+  const cached = cacheGet<T>(key);
+  if (cached !== null) cb(cached);
+  dedupedFetch(key, fetcher, ttlMs)
+    .then((fresh) => {
+      if (!cancelled) cb(fresh);
+    })
+    .catch((err) => {
+      console.warn(`cacheThenFetch(${key}) failed:`, err);
+      if (!cancelled && cached === null && fallback) cb(fallback());
+    });
+  return () => {
+    cancelled = true;
+  };
+}

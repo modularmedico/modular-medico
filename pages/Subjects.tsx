@@ -26,11 +26,11 @@ import {
 } from "../data/subjects";
 import {
   subscribeBlockDefinitions,
-  subscribeCurriculumCounts,
-  subscribePublishedQuestions,
-  type CurriculumCounts,
+  subscribeBlockCounts,
+  subscribeBlockOutline,
+  subscribeSubjectCounts,
+  type BlockOutline,
 } from "../services/adminContent";
-import type { FirestoreQuestion } from "../types";
 
 export default function Subjects() {
   const navigate = useNavigate();
@@ -50,28 +50,33 @@ export default function Subjects() {
   const [selectedBlockNum, setSelectedBlockNum] = useState(1);
   const [yearFilter, setYearFilter] = useState<string>("all");
   const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
-  const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);
-  const [questionsLoaded, setQuestionsLoaded] = useState(false);
-  const [counts, setCounts] = useState<CurriculumCounts>({
-    blockCounts: {},
-    moduleCounts: {},
-    subjectInModuleCounts: {},
-    subjectTotalCounts: {},
-  });
+  // Homepage loads only numbers (block/subject counts). The module -> subject outline of a
+  // block is fetched when that block is selected; full MCQs load only when a module or
+  // subject is actually opened (on the practice screen).
+  const [blockCounts, setBlockCounts] = useState<Record<number, number> | null>(null);
+  const [outlines, setOutlines] = useState<Record<number, BlockOutline>>({});
+  const [subjectCounts, setSubjectCounts] = useState<Record<string, number> | null>(null);
+
+  useEffect(() => subscribeBlockDefinitions(setBlockDefs), []);
+
+  const blockKey = blockDefs.map((b) => b.block).join(",");
+  useEffect(() => {
+    const blocks = blockKey ? blockKey.split(",").map(Number) : [];
+    return subscribeBlockCounts(blocks, setBlockCounts);
+  }, [blockKey]);
+
+  useEffect(
+    () =>
+      subscribeBlockOutline(selectedBlockNum, (o) =>
+        setOutlines((prev) => ({ ...prev, [selectedBlockNum]: o }))
+      ),
+    [selectedBlockNum]
+  );
 
   useEffect(() => {
-    const unsubBlocks = subscribeBlockDefinitions(setBlockDefs);
-    const unsubCounts = subscribeCurriculumCounts(setCounts);
-    const unsubQs = subscribePublishedQuestions((qs) => {
-      setAllQuestions(qs);
-      setQuestionsLoaded(true);
-    });
-    return () => {
-      unsubBlocks();
-      unsubCounts();
-      unsubQs();
-    };
-  }, []);
+    if (activeTab !== "subject") return;
+    return subscribeSubjectCounts([...SUBJECT_LIST], setSubjectCounts);
+  }, [activeTab]);
 
   const setView = (v: "block" | "subject") => {
     setSearchParams({ view: v });
@@ -100,34 +105,13 @@ export default function Subjects() {
   const currentBlockDef = blockDefs.find((b) => b.block === selectedBlockNum) || DEFAULT_BLOCK_DEFINITIONS[0];
   const currentBlockLocked = !isBlockUnlocked(currentBlockDef.block);
 
-  // Only show modules that actually have published MCQs added by the admin for this block.
-  // Nothing is pre-populated from the curriculum scaffold anymore — a module only appears
-  // once real content exists for it.
-  const displayModules = useMemo(() => {
-    const moduleMap = new Map<string, { id: string; name: string; description?: string; subjects: SubjectId[] }>();
+  // Only modules that actually have published MCQs appear (derived from the block outline).
+  const outline = outlines[selectedBlockNum];
+  const displayModules = outline?.modules ?? [];
+  const outlineLoaded = !!outline;
 
-    allQuestions
-      .filter((q) => q.block === selectedBlockNum && q.status === "published")
-      .forEach((q) => {
-        const modId = q.moduleId || q.moduleName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        const existing = moduleMap.get(modId);
-        if (existing) {
-          if (!existing.subjects.includes(q.subjectId as SubjectId)) {
-            existing.subjects.push(q.subjectId as SubjectId);
-          }
-        } else {
-          moduleMap.set(modId, {
-            id: modId,
-            name: q.moduleName || "General Module",
-            subjects: [q.subjectId as SubjectId],
-          });
-        }
-      });
-
-    return Array.from(moduleMap.values());
-  }, [allQuestions, selectedBlockNum]);
-
-  const totalQuestionsInSelectedBlock = counts.blockCounts[selectedBlockNum] || 0;
+  const totalQuestionsInSelectedBlock = outline?.total ?? blockCounts?.[selectedBlockNum] ?? 0;
+  const selectedTotalKnown = !!outline || !!blockCounts;
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto">
@@ -192,7 +176,7 @@ export default function Subjects() {
           {/* Block Selector 1–15 */}
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-15">
             {filteredBlockDefs.map((b) => {
-              const totalInBlock = counts.blockCounts[b.block] || 0;
+              const totalInBlock = outlines[b.block]?.total ?? blockCounts?.[b.block] ?? 0;
               const isSelected = selectedBlockNum === b.block;
               const isLocked = !isBlockUnlocked(b.block);
 
@@ -236,7 +220,7 @@ export default function Subjects() {
                       marginTop: 2,
                     }}
                   >
-                    {questionsLoaded ? `${totalInBlock} Qs` : "Loading\u2026"}
+                    {blockCounts || outlines[b.block] ? `${totalInBlock} Qs` : "Loading\u2026"}
                   </span>
                 </button>
               );
@@ -275,7 +259,7 @@ export default function Subjects() {
                     className="rounded-full px-3 py-1 font-mono text-xs font-bold"
                     style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}
                   >
-                    {questionsLoaded ? `${totalQuestionsInSelectedBlock} Questions` : "Loading\u2026"}
+                    {selectedTotalKnown ? `${totalQuestionsInSelectedBlock} Questions` : "Loading\u2026"}
                   </span>
                 </div>
 
@@ -328,7 +312,7 @@ export default function Subjects() {
                 </div>
               </div>
 
-              {!questionsLoaded && (
+              {!outlineLoaded && (
                 <div
                   className="flex flex-col items-center justify-center gap-3 rounded-2xl p-10 text-center"
                   style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
@@ -337,7 +321,7 @@ export default function Subjects() {
                 </div>
               )}
 
-              {questionsLoaded && displayModules.length === 0 && (
+              {outlineLoaded && displayModules.length === 0 && (
                 <div
                   className="flex flex-col items-center justify-center gap-2 rounded-2xl p-10 text-center"
                   style={{ backgroundColor: t.surfaceAlt, border: `1.5px dashed ${t.border}` }}
@@ -353,9 +337,7 @@ export default function Subjects() {
 
               <div className="flex flex-col gap-4">
                 {displayModules.map((mod, modIdx) => {
-                  const modQuestions =
-                    counts.moduleCounts[`${currentBlockDef.block}-${mod.id}`] ||
-                    allQuestions.filter((q) => q.block === currentBlockDef.block && (q.moduleId === mod.id || q.moduleName === mod.name)).length;
+                  const modQuestions = mod.total;
 
                   return (
                     <div
@@ -418,11 +400,9 @@ export default function Subjects() {
                       {/* Subjects in this Module */}
                       <div>
                         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                          {mod.subjects.map((subjId) => {
+                          {mod.subjects.map(({ subjectId, count: countInModule }) => {
+                            const subjId = subjectId as SubjectId;
                             const meta = SUBJECT_META[subjId] || { label: subjId, tag: "MBBS" };
-                            const countInModule =
-                              counts.subjectInModuleCounts[`${currentBlockDef.block}-${mod.id}-${subjId}`] ||
-                              allQuestions.filter((q) => q.block === currentBlockDef.block && (q.moduleId === mod.id || q.moduleName === mod.name) && q.subjectId === subjId).length;
                             const color = t.teal;
 
                             return (
@@ -495,7 +475,7 @@ export default function Subjects() {
             {SUBJECT_LIST.map((id, i) => {
               const meta = SUBJECT_META[id];
               const color = t.chip[i % t.chip.length];
-              const qCount = counts.subjectTotalCounts[id] || allQuestions.filter((q) => q.subjectId === id).length;
+              const qCount = subjectCounts?.[id] ?? 0;
 
               return (
                 <Card
@@ -523,7 +503,7 @@ export default function Subjects() {
                       className="rounded-full px-2.5 py-1 font-mono text-xs font-bold"
                       style={{ backgroundColor: `${t.gold}18`, color: t.gold }}
                     >
-                      {questionsLoaded ? `${qCount} Qs` : "Loading\u2026"}
+                      {subjectCounts ? `${qCount} Qs` : "Loading\u2026"}
                     </span>
                     <ChevronRight size={16} color={t.textFaint} />
                   </div>
