@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { PlayCircle, FolderTree, X, ExternalLink } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { PlayCircle, FolderTree, X, ExternalLink, Lock } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Spinner from "../components/Spinner";
 import { THEME, FONT_DISPLAY } from "../theme";
-import { useAppStore } from "../store/useAppStore";
+import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { SUBJECT_META, DEFAULT_BLOCK_DEFINITIONS, TOTAL_BLOCKS, type SubjectId } from "../data/subjects";
 import { subscribePublishedLectures, toYouTubeEmbedUrl } from "../services/lectures";
 import type { FirestoreLecture } from "../types";
@@ -15,13 +16,22 @@ import type { FirestoreLecture } from "../types";
  * scaffold students already use to find MCQs.
  */
 export default function Lectures() {
+  const navigate = useNavigate();
   const isDark = useAppStore((s) => s.isDark);
   const t = isDark ? THEME.dark : THEME.light;
+  const isLoggedIn = useIsLoggedIn();
+  const isPremium = useIsPremium();
+  const isAdmin = useAppStore((s) => s.isAdmin);
+  const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
+  const freeBlocks = useAppStore((s) => s.freeBlocks);
+  const isBlockUnlocked = (block: number) =>
+    freeBlocks.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
 
   const [lectures, setLectures] = useState<FirestoreLecture[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState<number>(1);
   const [activeLecture, setActiveLecture] = useState<FirestoreLecture | null>(null);
+  const selectedBlockLocked = !isBlockUnlocked(selectedBlock);
 
   useEffect(() => {
     const unsub = subscribePublishedLectures((ls) => {
@@ -86,17 +96,27 @@ export default function Lectures() {
         {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1).map((b) => {
           const isSelected = selectedBlock === b;
           const blockDef = DEFAULT_BLOCK_DEFINITIONS.find((d) => d.block === b);
+          const isLocked = !isBlockUnlocked(b);
           return (
             <button
               key={b}
               onClick={() => setSelectedBlock(b)}
-              className="flex flex-col items-center justify-center rounded-2xl p-2.5 text-center transition-all hover:scale-[1.02]"
+              className="relative flex flex-col items-center justify-center rounded-2xl p-2.5 text-center transition-all hover:scale-[1.02]"
               style={{
                 backgroundColor: isSelected ? t.purpleStrong : t.surfaceAlt,
                 color: isSelected ? "#fff" : t.text,
                 border: `1.5px solid ${isSelected ? t.purpleStrong : t.border}`,
               }}
             >
+              {isLocked && (
+                <div
+                  className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full shadow-md z-10"
+                  style={{ backgroundColor: t.gold, color: "#241A08" }}
+                  title="Requires Full Access"
+                >
+                  <Lock size={10} strokeWidth={2.5} />
+                </div>
+              )}
               <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>B{b}</span>
               <span
                 className="truncate max-w-[65px] text-[10px] font-semibold mt-0.5"
@@ -115,6 +135,28 @@ export default function Lectures() {
           style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
         >
           <Spinner t={t} size={22} label="Loading lectures\u2026" />
+        </div>
+      )}
+
+      {selectedBlockLocked && (
+        <div
+          className="flex flex-col items-center justify-center gap-2 rounded-2xl p-6 text-center"
+          style={{ backgroundColor: `${t.gold}18`, border: `1.5px dashed ${t.gold}` }}
+        >
+          <Lock size={18} color={t.gold} />
+          <p className="text-xs font-bold" style={{ color: t.text }}>
+            Block {selectedBlock} lectures are locked
+          </p>
+          <p className="max-w-sm text-[11.5px]" style={{ color: t.textMuted }}>
+            Unlock full access to watch lectures in this block.
+          </p>
+          <button
+            onClick={() => navigate(isLoggedIn ? "/paywall" : "/signup")}
+            className="mt-1 rounded-xl px-4 py-2 text-xs font-bold"
+            style={{ backgroundColor: t.gold, color: "#241A08" }}
+          >
+            {isLoggedIn ? "Unlock Full Access" : "Sign Up to Unlock"}
+          </button>
         </div>
       )}
 
@@ -155,14 +197,26 @@ export default function Lectures() {
                             {sh.lectures.map((l) => (
                               <button
                                 key={l.id}
-                                onClick={() => setActiveLecture(l)}
+                                onClick={() =>
+                                  selectedBlockLocked
+                                    ? navigate(isLoggedIn ? "/paywall" : "/signup")
+                                    : setActiveLecture(l)
+                                }
                                 className="flex items-center gap-3 rounded-xl p-3 text-left transition-all hover:scale-[1.01]"
                                 style={{ backgroundColor: t.surface, border: `1px solid ${t.border}` }}
                               >
                                 <div
-                                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                                  className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
                                   style={{ backgroundColor: `${t.purple}22` }}
                                 >
+                                  {selectedBlockLocked && (
+                                    <div
+                                      className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full shadow-sm"
+                                      style={{ backgroundColor: t.gold, color: "#241A08" }}
+                                    >
+                                      <Lock size={8} strokeWidth={3} />
+                                    </div>
+                                  )}
                                   <PlayCircle size={18} color={t.purple} />
                                 </div>
                                 <div className="min-w-0 flex-1">

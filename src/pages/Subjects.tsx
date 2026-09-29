@@ -57,9 +57,11 @@ export default function Subjects() {
   // A subject is locked only if its block isn't unlocked AND admin hasn't marked it free.
   const isSubjectLocked = (block: number, subjectId: string) =>
     !isBlockUnlocked(block) && !isSubjectFree(freeSubjects, block, subjectId);
-  // Block badge: show the lock only when nothing in the block is free.
+  // Block tile badge: any block that isn't in the free list is a paid block and always
+  // shows a lock, unless this user has really bought it (premium or granted block).
+  // (Admin access and per-subject free unlocks do NOT hide the tile lock.)
   const isBlockBadgeLocked = (block: number) =>
-    !isBlockUnlocked(block) && !blockHasFreeSubject(freeSubjects, block);
+    !freeBlocks.includes(block) && !isPremium && !unlockedBlocks?.includes(block);
 
   const [selectedBlockNum, setSelectedBlockNum] = useState(1);
   const [yearFilter, setYearFilter] = useState<string>("all");
@@ -206,14 +208,13 @@ export default function Subjects() {
                     boxShadow: isSelected ? `0 4px 14px ${t.purpleStrong}40` : "none",
                   }}
                 >
-                  {/* Fixed Lock Icon (Requirement 10) */}
                   {isLocked && (
                     <div
-                      className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full shadow-md z-10"
+                      className="absolute top-1.5 right-1.5 flex h-5 w-5 items-center justify-center rounded-full shadow-md z-10"
                       style={{ backgroundColor: t.gold, color: "#241A08" }}
                       title="Requires Full Access"
                     >
-                      <Lock size={10} strokeWidth={2.5} />
+                      <Lock size={11} strokeWidth={2.75} />
                     </div>
                   )}
 
