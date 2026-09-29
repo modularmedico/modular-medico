@@ -96,7 +96,7 @@ export default function Paywall() {
 
   const handleActivateSubscription = () => {
     const messageLines = [
-      "Hi! I'd like to subscribe to Modular Medico's Full MBBS Access (PKR 1500/year).",
+      "Hi! I'd like to get Blocks 1, 2 & 3 on Modular Medico for PKR 499.",
       email ? `My account email: ${email}` : null,
     ].filter(Boolean);
     const waUrl = `https://wa.me/${PURCHASE_WHATSAPP_NUMBER}?text=${encodeURIComponent(messageLines.join("\n"))}`;
@@ -116,7 +116,7 @@ export default function Paywall() {
       <Card t={t} style={{ borderColor: t.gold }}>
         <div className="mb-3 flex items-center justify-between">
           <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>Unlimited Practice Tier</span>
-          <Pill t={t} tone="gold">PKR 1500 / Year</Pill>
+          <Pill t={t} tone="gold">Blocks 1, 2 & 3 · PKR 499</Pill>
         </div>
         <ul className="flex flex-col gap-2.5">
           {PERKS.map((p) => (
