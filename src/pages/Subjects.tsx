@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Sparkles,
   ChevronRight,
-  Crown,
   BookOpen,
   Layers,
   Play,
@@ -28,11 +26,15 @@ import {
 } from "../data/subjects";
 import {
   subscribeBlockDefinitions,
-  subscribeCurriculumCounts,
-  subscribePublishedQuestions,
-  type CurriculumCounts,
+  subscribeBlockCounts,
+  subscribeBlockOutline,
+  subscribeSubjectCounts,
+  subscribeFreeSubjects,
+  isSubjectFree,
+  blockHasFreeSubject,
+  type BlockOutline,
+  type FreeSubjectsMap,
 } from "../services/adminContent";
-import type { FirestoreQuestion } from "../types";
 
 export default function Subjects() {
   const navigate = useNavigate();
@@ -49,31 +51,46 @@ export default function Subjects() {
     freeBlocks.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
   const t = isDark ? THEME.dark : THEME.light;
 
+  // Admin-chosen free subjects inside otherwise paid blocks.
+  const [freeSubjects, setFreeSubjects] = useState<FreeSubjectsMap>({});
+  useEffect(() => subscribeFreeSubjects(setFreeSubjects), []);
+  // A subject is locked only if its block isn't unlocked AND admin hasn't marked it free.
+  const isSubjectLocked = (block: number, subjectId: string) =>
+    !isBlockUnlocked(block) && !isSubjectFree(freeSubjects, block, subjectId);
+  // Block badge: show the lock only when nothing in the block is free.
+  const isBlockBadgeLocked = (block: number) =>
+    !isBlockUnlocked(block) && !blockHasFreeSubject(freeSubjects, block);
+
   const [selectedBlockNum, setSelectedBlockNum] = useState(1);
   const [yearFilter, setYearFilter] = useState<string>("all");
   const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
-  const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);
-  const [questionsLoaded, setQuestionsLoaded] = useState(false);
-  const [counts, setCounts] = useState<CurriculumCounts>({
-    blockCounts: {},
-    moduleCounts: {},
-    subjectInModuleCounts: {},
-    subjectTotalCounts: {},
-  });
+  // Homepage loads only numbers (block/subject counts). The module -> subject outline of a
+  // block is fetched when that block is selected; full MCQs load only when a module or
+  // subject is actually opened (on the practice screen).
+  const [blockCounts, setBlockCounts] = useState<Record<number, number> | null>(null);
+  const [outlines, setOutlines] = useState<Record<number, BlockOutline>>({});
+  const [subjectCounts, setSubjectCounts] = useState<Record<string, number> | null>(null);
+
+  useEffect(() => subscribeBlockDefinitions(setBlockDefs), []);
+
+  const blockKey = blockDefs.map((b) => b.block).join(",");
+  useEffect(() => {
+    const blocks = blockKey ? blockKey.split(",").map(Number) : [];
+    return subscribeBlockCounts(blocks, setBlockCounts);
+  }, [blockKey]);
+
+  useEffect(
+    () =>
+      subscribeBlockOutline(selectedBlockNum, (o) =>
+        setOutlines((prev) => ({ ...prev, [selectedBlockNum]: o }))
+      ),
+    [selectedBlockNum]
+  );
 
   useEffect(() => {
-    const unsubBlocks = subscribeBlockDefinitions(setBlockDefs);
-    const unsubCounts = subscribeCurriculumCounts(setCounts);
-    const unsubQs = subscribePublishedQuestions((qs) => {
-      setAllQuestions(qs);
-      setQuestionsLoaded(true);
-    });
-    return () => {
-      unsubBlocks();
-      unsubCounts();
-      unsubQs();
-    };
-  }, []);
+    if (activeTab !== "subject") return;
+    return subscribeSubjectCounts([...SUBJECT_LIST], setSubjectCounts);
+  }, [activeTab]);
 
   const setView = (v: "block" | "subject") => {
     setSearchParams({ view: v });
@@ -102,34 +119,13 @@ export default function Subjects() {
   const currentBlockDef = blockDefs.find((b) => b.block === selectedBlockNum) || DEFAULT_BLOCK_DEFINITIONS[0];
   const currentBlockLocked = !isBlockUnlocked(currentBlockDef.block);
 
-  // Only show modules that actually have published MCQs added by the admin for this block.
-  // Nothing is pre-populated from the curriculum scaffold anymore — a module only appears
-  // once real content exists for it.
-  const displayModules = useMemo(() => {
-    const moduleMap = new Map<string, { id: string; name: string; description?: string; subjects: SubjectId[] }>();
+  // Only modules that actually have published MCQs appear (derived from the block outline).
+  const outline = outlines[selectedBlockNum];
+  const displayModules = outline?.modules ?? [];
+  const outlineLoaded = !!outline;
 
-    allQuestions
-      .filter((q) => q.block === selectedBlockNum && q.status === "published")
-      .forEach((q) => {
-        const modId = q.moduleId || q.moduleName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        const existing = moduleMap.get(modId);
-        if (existing) {
-          if (!existing.subjects.includes(q.subjectId as SubjectId)) {
-            existing.subjects.push(q.subjectId as SubjectId);
-          }
-        } else {
-          moduleMap.set(modId, {
-            id: modId,
-            name: q.moduleName || "General Module",
-            subjects: [q.subjectId as SubjectId],
-          });
-        }
-      });
-
-    return Array.from(moduleMap.values());
-  }, [allQuestions, selectedBlockNum]);
-
-  const totalQuestionsInSelectedBlock = counts.blockCounts[selectedBlockNum] || 0;
+  const totalQuestionsInSelectedBlock = outline?.total ?? blockCounts?.[selectedBlockNum] ?? 0;
+  const selectedTotalKnown = !!outline || !!blockCounts;
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto">
@@ -172,25 +168,6 @@ export default function Subjects() {
         </div>
       </div>
 
-      {!isPremium && (
-        <Card t={t} style={{ backgroundColor: t.purpleDeep, borderColor: t.purple }}>
-          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
-            <div>
-              <div className="mb-1 flex items-center gap-2">
-                <Sparkles size={16} color={t.gold} />
-                <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>Full MBBS Access</span>
-              </div>
-              <p className="text-xs" style={{ color: t.textMuted }}>
-                Block 3 is open for free practice. Unlock all Blocks 1–15 with a full pass.
-              </p>
-            </div>
-            <Btn t={t} icon={Crown} onClick={() => navigate(isLoggedIn ? "/paywall" : "/signup")}>
-              {isLoggedIn ? "Manage Access" : "Create Free Account"}
-            </Btn>
-          </div>
-        </Card>
-      )}
-
       {/* ========================================================================= */}
       {/* 1. PRIMARY VIEW: BLOCK HIERARCHY                                          */}
       {/* ========================================================================= */}
@@ -213,9 +190,9 @@ export default function Subjects() {
           {/* Block Selector 1–15 */}
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-15">
             {filteredBlockDefs.map((b) => {
-              const totalInBlock = counts.blockCounts[b.block] || 0;
+              const totalInBlock = outlines[b.block]?.total ?? blockCounts?.[b.block] ?? 0;
               const isSelected = selectedBlockNum === b.block;
-              const isLocked = !isBlockUnlocked(b.block);
+              const isLocked = isBlockBadgeLocked(b.block);
 
               return (
                 <button
@@ -257,7 +234,7 @@ export default function Subjects() {
                       marginTop: 2,
                     }}
                   >
-                    {questionsLoaded ? `${totalInBlock} Qs` : "Loading\u2026"}
+                    {blockCounts || outlines[b.block] ? `${totalInBlock} Qs` : "Loading\u2026"}
                   </span>
                 </button>
               );
@@ -296,7 +273,7 @@ export default function Subjects() {
                     className="rounded-full px-3 py-1 font-mono text-xs font-bold"
                     style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}
                   >
-                    {questionsLoaded ? `${totalQuestionsInSelectedBlock} Questions` : "Loading\u2026"}
+                    {selectedTotalKnown ? `${totalQuestionsInSelectedBlock} Questions` : "Loading\u2026"}
                   </span>
                 </div>
 
@@ -330,10 +307,12 @@ export default function Subjects() {
                     )
                   }
                 >
-                  {currentBlockLocked ? "Unlock Block" : `Start Block ${currentBlockDef.block} Exam`}
+                  {currentBlockLocked ? `Unlock Block ${currentBlockDef.block}` : `Start Block ${currentBlockDef.block} Exam`}
                 </Btn>
                 <span className="text-center text-[11px]" style={{ color: t.textFaint }}>
-                  Full multi-module exam
+                  {currentBlockLocked && blockHasFreeSubject(freeSubjects, currentBlockDef.block)
+                    ? "Some subjects in this block are free"
+                    : "Full multi-module exam"}
                 </span>
               </div>
             </div>
@@ -349,7 +328,7 @@ export default function Subjects() {
                 </div>
               </div>
 
-              {!questionsLoaded && (
+              {!outlineLoaded && (
                 <div
                   className="flex flex-col items-center justify-center gap-3 rounded-2xl p-10 text-center"
                   style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
@@ -358,7 +337,7 @@ export default function Subjects() {
                 </div>
               )}
 
-              {questionsLoaded && displayModules.length === 0 && (
+              {outlineLoaded && displayModules.length === 0 && (
                 <div
                   className="flex flex-col items-center justify-center gap-2 rounded-2xl p-10 text-center"
                   style={{ backgroundColor: t.surfaceAlt, border: `1.5px dashed ${t.border}` }}
@@ -374,9 +353,9 @@ export default function Subjects() {
 
               <div className="flex flex-col gap-4">
                 {displayModules.map((mod, modIdx) => {
-                  const modQuestions =
-                    counts.moduleCounts[`${currentBlockDef.block}-${mod.id}`] ||
-                    allQuestions.filter((q) => q.block === currentBlockDef.block && (q.moduleId === mod.id || q.moduleName === mod.name)).length;
+                  const modQuestions = mod.total;
+                  // Whole-module practice needs every subject in it to be accessible.
+                  const modLocked = mod.subjects.some((sj) => isSubjectLocked(currentBlockDef.block, sj.subjectId));
 
                   return (
                     <div
@@ -419,19 +398,19 @@ export default function Subjects() {
                           <button
                             onClick={() =>
                               navigate(
-                                currentBlockLocked
+                                modLocked
                                   ? (isLoggedIn ? "/paywall" : "/signup")
                                   : `/subjects/all/${mod.id}/${currentBlockDef.block}`
                               )
                             }
                             className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all hover:scale-[1.02]"
                             style={{
-                              backgroundColor: currentBlockLocked ? t.gold : t.purpleStrong,
+                              backgroundColor: modLocked ? t.gold : t.purpleStrong,
                               color: "#fff",
                             }}
                           >
-                            {currentBlockLocked ? <Lock size={13} fill="#fff" /> : <Play size={13} fill="#fff" />}
-                            {currentBlockLocked ? "Unlock Module" : `Practice Module`}
+                            {modLocked ? <Lock size={13} fill="#fff" /> : <Play size={13} fill="#fff" />}
+                            {modLocked ? "Unlock Module" : `Practice Module`}
                           </button>
                         </div>
                       </div>
@@ -439,19 +418,19 @@ export default function Subjects() {
                       {/* Subjects in this Module */}
                       <div>
                         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                          {mod.subjects.map((subjId) => {
+                          {mod.subjects.map(({ subjectId, count: countInModule }) => {
+                            const subjId = subjectId as SubjectId;
                             const meta = SUBJECT_META[subjId] || { label: subjId, tag: "MBBS" };
-                            const countInModule =
-                              counts.subjectInModuleCounts[`${currentBlockDef.block}-${mod.id}-${subjId}`] ||
-                              allQuestions.filter((q) => q.block === currentBlockDef.block && (q.moduleId === mod.id || q.moduleName === mod.name) && q.subjectId === subjId).length;
                             const color = t.teal;
+                            const subjLocked = isSubjectLocked(currentBlockDef.block, subjId);
+                            const subjFree = currentBlockLocked && !subjLocked;
 
                             return (
                               <div
                                 key={subjId}
                                 onClick={() =>
                                   navigate(
-                                    currentBlockLocked
+                                    subjLocked
                                       ? (isLoggedIn ? "/paywall" : "/signup")
                                       : `/subjects/${subjId}/${mod.id}/${currentBlockDef.block}`
                                   )
@@ -466,7 +445,7 @@ export default function Subjects() {
                                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl relative"
                                   style={{ backgroundColor: `${color}22` }}
                                 >
-                                  {currentBlockLocked && (
+                                  {subjLocked && (
                                     <div
                                       className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full shadow-sm"
                                       style={{ backgroundColor: t.gold, color: "#241A08" }}
@@ -482,6 +461,14 @@ export default function Subjects() {
                                   </span>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1.5">
+                                  {subjFree && (
+                                    <span
+                                      className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                                      style={{ backgroundColor: `${t.teal}22`, color: t.teal }}
+                                    >
+                                      FREE
+                                    </span>
+                                  )}
                                   <span
                                     className="rounded-full px-2 py-0.5 font-mono text-[10px] font-bold"
                                     style={{
@@ -516,7 +503,7 @@ export default function Subjects() {
             {SUBJECT_LIST.map((id, i) => {
               const meta = SUBJECT_META[id];
               const color = t.chip[i % t.chip.length];
-              const qCount = counts.subjectTotalCounts[id] || allQuestions.filter((q) => q.subjectId === id).length;
+              const qCount = subjectCounts?.[id] ?? 0;
 
               return (
                 <Card
@@ -544,7 +531,7 @@ export default function Subjects() {
                       className="rounded-full px-2.5 py-1 font-mono text-xs font-bold"
                       style={{ backgroundColor: `${t.gold}18`, color: t.gold }}
                     >
-                      {questionsLoaded ? `${qCount} Qs` : "Loading\u2026"}
+                      {subjectCounts ? `${qCount} Qs` : "Loading\u2026"}
                     </span>
                     <ChevronRight size={16} color={t.textFaint} />
                   </div>

@@ -19,7 +19,7 @@ import Btn from "../components/Btn";
 import Segmented from "../components/Segmented";
 import Toggle from "../components/Toggle";
 import { THEME, FONT_DISPLAY } from "../theme";
-import { useAppStore, useIsLoggedIn, useIsBlockUnlocked } from "../store/useAppStore";
+import { useAppStore, useIsLoggedIn, useIsBlockUnlocked, useIsSubjectUnlocked } from "../store/useAppStore";
 import { SUBJECT_META, isSubjectId, DEFAULT_BLOCK_DEFINITIONS, type BlockDefinition } from "../data/subjects";
 import {
   subscribeBlockDefinitions,
@@ -213,7 +213,10 @@ export default function PracticeSetup() {
     ? `${targetModule?.name || moduleId}`
     : `${SUBJECT_META[subjectId as keyof typeof SUBJECT_META]?.label || subjectId} \u00b7 ${targetModule?.name || `Block ${block}`}`;
 
-  const locked = !useIsBlockUnlocked(block);
+  const blockUnlocked = useIsBlockUnlocked(block);
+  // A single subject can be free inside a paid block (admin > Manage Access).
+  const subjectUnlocked = useIsSubjectUnlocked(block, isSubjectInModule ? subjectId : null);
+  const locked = !(blockUnlocked || subjectUnlocked);
 
   const selectedTopic = selectedTopicName
     ? topics.find((s) => s.name === selectedTopicName) || null
@@ -276,7 +279,7 @@ export default function PracticeSetup() {
         </div>
         <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 22 }}>Unlock Block {block}</h1>
         <p style={{ color: t.textMuted, fontSize: 14, lineHeight: 1.5 }}>
-          Block 3 is open for free trial practice. Unlock full access to Blocks 1–15 and custom exams.
+          Get Blocks 1, 2 & 3 for just PKR 499, or unlock full access to every block and custom exams.
         </p>
         <Btn t={t} onClick={() => navigate(isLoggedIn ? "/paywall" : "/signup")}>
           {isLoggedIn ? "Unlock Full Access" : "Create Free Account"}

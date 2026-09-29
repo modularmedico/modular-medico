@@ -22,6 +22,7 @@ import {
   BookMarked,
   NotebookText,
   ShoppingBag,
+  Crown,
 } from "lucide-react";
 import Pill from "../components/Pill";
 import Card from "../components/Card";
@@ -29,6 +30,7 @@ import Btn from "../components/Btn";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { SUBJECT_LIST, SUBJECT_META } from "../data/subjects";
+import { OFFER_CTA, OFFER_SUBLINE, START_PRACTICE_CTA } from "../data/offer";
 
 const SCATTER_ROTATIONS = [-4, 3, -2, 5, -6, 2, -3, 4];
 const SCATTER_SUBJECTS = SUBJECT_LIST.map((id, i) => ({ id, rotate: SCATTER_ROTATIONS[i % SCATTER_ROTATIONS.length] }));
@@ -131,11 +133,18 @@ export default function Home() {
 
           <div className="flex flex-wrap gap-3 pt-2">
             <Btn t={t} icon={ArrowRight} onClick={() => navigate("/subjects")}>
-              Start Practicing Free
+              {START_PRACTICE_CTA}
             </Btn>
             <Btn t={t} variant="ghost" onClick={() => navigate(isLoggedIn ? "/builder" : "/login")}>
               {isLoggedIn ? "Build a Custom Quiz" : "Create Free Account"}
             </Btn>
+          </div>
+
+          <div className="flex flex-col gap-1 pt-1">
+            <Btn t={t} icon={Crown} onClick={() => navigate("/paywall")}>
+              {OFFER_CTA}
+            </Btn>
+            <span style={{ color: t.textFaint, fontSize: 12 }}>{OFFER_SUBLINE}</span>
           </div>
         </div>
 
@@ -290,7 +299,7 @@ export default function Home() {
             </div>
             <ul className="flex flex-col gap-3.5 text-sm" style={{ color: t.textMuted }}>
               <li className="flex items-center gap-3">
-                <Check size={16} color={t.green} /> Open access to Block 3 sets
+                <Check size={16} color={t.green} /> Free subjects inside every block
               </li>
               <li className="flex items-center gap-3">
                 <Check size={16} color={t.green} /> Instant answer rationales &amp; explanations

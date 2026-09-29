@@ -97,6 +97,7 @@ import {
   type DailyVisitPoint,
 } from "../services/siteStats";
 import { parseBracketFormat } from "../utils/parseBracketFormat";
+import FreeSubjectsManager from "../components/admin/FreeSubjectsManager";
 import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreStudyNote, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 
 const ADMIN_TABS = [
@@ -3396,6 +3397,7 @@ export default function AdminPanel() {
       {/* ===================================================================== */}
       {activeTab === "manage_access" && (
         <div className="flex flex-col gap-5">
+          <FreeSubjectsManager />
           <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
             <div className="flex items-start gap-3">
               {freeBlocksLoading ? (

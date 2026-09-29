@@ -9,14 +9,16 @@ import {
   where,
   orderBy,
   getDocs,
+  getCountFromServer,
   setDoc,
   writeBatch,
+  type QueryConstraint,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { DEFAULT_MODULES, DEFAULT_QUESTIONS } from "../data/defaultCurriculum";
 import { DEFAULT_BLOCK_DEFINITIONS, FREE_BLOCKS as DEFAULT_FREE_BLOCKS, type BlockDefinition } from "../data/subjects";
 import type { Difficulty, FirestoreQuestion, ModuleDoc, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
-import { cacheFirstFetch, cacheFirstSnapshot, ONE_HOUR } from "../utils/localCache";
+import { cacheFirstFetch, cacheFirstSnapshot, cacheThenFetch, cachePurgePrefix, ONE_HOUR } from "../utils/localCache";
 
 const LOCAL_MODULES_KEY = "modular_medico_custom_modules";
 const LOCAL_BLOCKS_KEY = "modular_medico_custom_blocks";
@@ -77,6 +79,92 @@ export async function saveFreeBlocks(blocks: number[]): Promise<void> {
   const cleaned = Array.from(new Set(blocks)).sort((a, b) => a - b);
   setLocalFreeBlocks(cleaned);
   await setDoc(doc(db, "settings", "freeBlocks"), { blocks: cleaned });
+}
+
+/* ------------------- Free subjects inside paid blocks ------------------- */
+
+/**
+ * Per-block list of subject ids that stay FREE even though the block itself is
+ * paywalled. Stored in one Firestore doc (`settings/freeSubjects`) shaped as
+ * `{ map: { "1": ["anatomy", "physiology"], "2": [...] } }`.
+ * A block that is already fully free (freeBlocks) ignores this.
+ */
+export type FreeSubjectsMap = Record<number, string[]>;
+
+const LOCAL_FREE_SUBJECTS_KEY = "modular_medico_free_subjects";
+
+function normalizeFreeSubjects(raw: unknown): FreeSubjectsMap {
+  const out: FreeSubjectsMap = {};
+  if (raw && typeof raw === "object") {
+    Object.entries(raw as Record<string, unknown>).forEach(([k, v]) => {
+      const block = Number(k);
+      if (Number.isFinite(block) && Array.isArray(v) && v.length) {
+        out[block] = Array.from(new Set(v.map(String)));
+      }
+    });
+  }
+  return out;
+}
+
+function getLocalFreeSubjects(): FreeSubjectsMap {
+  try {
+    const raw = localStorage.getItem(LOCAL_FREE_SUBJECTS_KEY);
+    if (raw) return normalizeFreeSubjects(JSON.parse(raw));
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function setLocalFreeSubjects(map: FreeSubjectsMap) {
+  try {
+    localStorage.setItem(LOCAL_FREE_SUBJECTS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live view of which subjects are free inside each (paid) block. */
+export function subscribeFreeSubjects(cb: (map: FreeSubjectsMap) => void) {
+  const fallback = getLocalFreeSubjects();
+  return onSnapshot(
+    doc(db, "settings", "freeSubjects"),
+    (snap) => {
+      if (snap.exists()) {
+        const map = normalizeFreeSubjects((snap.data() as { map?: unknown }).map);
+        setLocalFreeSubjects(map);
+        cb(map);
+      } else {
+        cb(fallback);
+      }
+    },
+    (err) => {
+      console.warn("Firestore freeSubjects fallback:", err.message);
+      cb(fallback);
+    }
+  );
+}
+
+/** Admin action: replace the free-subject list for ONE block (empty array = all paid). */
+export async function saveBlockFreeSubjects(block: number, subjectIds: string[]): Promise<void> {
+  const next = { ...getLocalFreeSubjects() };
+  if (subjectIds.length) next[block] = Array.from(new Set(subjectIds));
+  else delete next[block];
+  setLocalFreeSubjects(next);
+  // Firestore map keys must be strings.
+  const asStrings: Record<string, string[]> = {};
+  Object.entries(next).forEach(([k, v]) => (asStrings[k] = v));
+  await setDoc(doc(db, "settings", "freeSubjects"), { map: asStrings });
+}
+
+/** True if this subject is free inside this block (used for gating + lock badges). */
+export function isSubjectFree(map: FreeSubjectsMap, block: number, subjectId: string): boolean {
+  return !!map[block]?.includes(subjectId);
+}
+
+/** True if the block has at least one free subject (so the block shows no lock). */
+export function blockHasFreeSubject(map: FreeSubjectsMap, block: number): boolean {
+  return (map[block]?.length ?? 0) > 0;
 }
 
 /**
@@ -979,20 +1067,65 @@ export function subscribeScopedQuestions(
   );
 }
 
-/** One-time fetch of published questions for a practice session (cached for a fast repeat load). */
-export async function fetchPublishedBlock(
-  subjectId: string,
-  moduleId?: string,
-  block?: number,
-  difficulty?: Difficulty | "all",
-  topicId?: string | null,
-  topicName?: string | null
-): Promise<FirestoreQuestion[]> {
-  const cacheKey = `pubBlock_${subjectId}_${moduleId ?? ""}_${block ?? ""}_${difficulty ?? ""}_${topicId ?? ""}_${topicName ?? ""}`;
-  return cacheFirstFetch(cacheKey, () => fetchPublishedBlockUncached(subjectId, moduleId, block, difficulty, topicId, topicName), ONE_HOUR);
+// ---------------------------------------------------------------------------
+// Practice-session fetchers.
+//
+// Speed notes (this is the path behind "Loading MCQs…"):
+//  - One download per *scope* (subject+module+block, module, or block). Difficulty and
+//    topic are applied client-side on that cached list, so picking a topic or difficulty
+//    never triggers another multi-second Firestore round trip.
+//  - Concurrent callers (PracticeSetup fires several on mount) share one request, and
+//    cacheFirstFetch serves stale data instantly while refreshing in the background.
+//  - If the live "all published questions" listener (Subjects screens) has already
+//    downloaded the bank this session, the scope is sliced from memory: zero network.
+//  - Firestore failures are never cached (the old code cached the offline fallback for an hour).
+// ---------------------------------------------------------------------------
+
+/** Raw published docs from the last server-confirmed snapshot of the whole bank. */
+let liveBank: FirestoreQuestion[] | null = null;
+let liveBankAt = 0;
+const LIVE_BANK_MAX_AGE = 15 * 60 * 1000;
+
+function liveBankIfFresh(): FirestoreQuestion[] | null {
+  return liveBank && Date.now() - liveBankAt < LIVE_BANK_MAX_AGE ? liveBank : null;
 }
 
-async function fetchPublishedBlockUncached(
+// Old per-topic/per-difficulty cache entries are orphaned by the scope-level keys below;
+// clear them once so they stop eating localStorage quota.
+cachePurgePrefix(["pubBlock_", "pubModuleExam_", "pubBlockExam_"]);
+
+async function fetchScopedBase(
+  cacheKey: string,
+  clauses: QueryConstraint[],
+  inScope: (q: FirestoreQuestion) => boolean,
+  defaultInScope: (q: FirestoreQuestion) => boolean
+): Promise<FirestoreQuestion[]> {
+  return cacheFirstFetch(
+    cacheKey,
+    async () => {
+      const bank = liveBankIfFresh();
+      let fsResults: FirestoreQuestion[];
+      if (bank) {
+        fsResults = bank.filter(inScope);
+      } else {
+        const snap = await getDocs(query(collection(db, "questions"), ...clauses));
+        fsResults = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+      }
+      const localQs = getLocalQuestions().filter((lq) => lq.status === "published" && inScope(lq));
+      const defResults = DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && defaultInScope(dq));
+      return mergeQuestionSources(defResults, localQs, fsResults);
+    },
+    ONE_HOUR
+  );
+}
+
+const byDifficulty = (list: FirestoreQuestion[], difficulty?: Difficulty | "all") =>
+  difficulty && difficulty !== "all" ? list.filter((q) => q.difficulty === difficulty) : list;
+
+const isRealModule = (moduleId?: string) => !!moduleId && moduleId !== "all" && moduleId !== "custom";
+
+/** One-time fetch of published questions for a practice session (cached for a fast repeat load). */
+export async function fetchPublishedBlock(
   subjectId: string,
   moduleId?: string,
   block?: number,
@@ -1018,44 +1151,27 @@ async function fetchPublishedBlockUncached(
     return list;
   };
 
+  const withModule = isRealModule(moduleId);
+  const withBlock = !!block && block > 0;
+  const fsScope = (q: FirestoreQuestion) =>
+    q.subjectId === subjectId && (!withModule || q.moduleId === moduleId) && (!withBlock || q.block === block);
+  const defScope = (q: FirestoreQuestion) =>
+    q.subjectId === subjectId &&
+    (!withModule || q.moduleId === moduleId || q.moduleName.toLowerCase() === moduleId!.toLowerCase()) &&
+    (!withBlock || q.block === block);
+
   try {
-    const clauses = [
-      where("subjectId", "==", subjectId),
-      where("status", "==", "published"),
-    ];
-    if (moduleId && moduleId !== "all" && moduleId !== "custom") {
-      clauses.push(where("moduleId", "==", moduleId));
-    }
-    if (block && block > 0) {
-      clauses.push(where("block", "==", block));
-    }
-    if (difficulty && difficulty !== "all") {
-      clauses.push(where("difficulty", "==", difficulty));
-    }
+    const clauses: QueryConstraint[] = [where("subjectId", "==", subjectId), where("status", "==", "published")];
+    if (withModule) clauses.push(where("moduleId", "==", moduleId));
+    if (withBlock) clauses.push(where("block", "==", block));
 
-    const q = query(collection(db, "questions"), ...clauses);
-    const snap = await getDocs(q);
-    const fsResults = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
-
-    const localQs = getLocalQuestions().filter((lq) => {
-      if (lq.subjectId !== subjectId || lq.status !== "published") return false;
-      if (moduleId && moduleId !== "all" && moduleId !== "custom" && lq.moduleId !== moduleId) return false;
-      if (block && block > 0 && lq.block !== block) return false;
-      if (difficulty && difficulty !== "all" && lq.difficulty !== difficulty) return false;
-      return true;
-    });
-
-    const defResults = DEFAULT_QUESTIONS.filter((dq) => {
-      if (dq.subjectId !== subjectId || dq.status !== "published") return false;
-      if (moduleId && moduleId !== "all" && moduleId !== "custom") {
-        if (dq.moduleId !== moduleId && dq.moduleName.toLowerCase() !== moduleId.toLowerCase()) return false;
-      }
-      if (block && block > 0 && dq.block !== block) return false;
-      if (difficulty && difficulty !== "all" && dq.difficulty !== difficulty) return false;
-      return true;
-    });
-
-    const combined = applyTopicFilter(mergeQuestionSources(defResults, localQs, fsResults));
+    const base = await fetchScopedBase(
+      `pubBlockBase_${subjectId}_${withModule ? moduleId : ""}_${withBlock ? block : ""}`,
+      clauses,
+      fsScope,
+      defScope
+    );
+    const combined = applyTopicFilter(byDifficulty(base, difficulty));
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedBlock failed, using default questions:", err);
@@ -1063,31 +1179,15 @@ async function fetchPublishedBlockUncached(
 
   // Fallback to local default questions
   return applyTopicFilter(
-    DEFAULT_QUESTIONS.filter((dq) => {
-      if (dq.subjectId !== subjectId || dq.status !== "published") return false;
-      if (moduleId && moduleId !== "all" && moduleId !== "custom") {
-        if (dq.moduleId !== moduleId && dq.moduleName.toLowerCase() !== moduleId.toLowerCase()) return false;
-      }
-      if (block && block > 0 && dq.block !== block) return false;
-      if (difficulty && difficulty !== "all" && dq.difficulty !== difficulty) return false;
-      return true;
-    })
+    byDifficulty(
+      DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && defScope(dq)),
+      difficulty
+    )
   );
 }
 
 /** One-time fetch of all published questions for a specific Module across all subjects (cached for a fast repeat load). */
 export async function fetchPublishedModuleExam(
-  block: number,
-  moduleId: string,
-  difficulty?: Difficulty | "all",
-  topicName?: string | null,
-  subjectId?: string | null
-): Promise<FirestoreQuestion[]> {
-  const cacheKey = `pubModuleExam_${block}_${moduleId}_${difficulty ?? ""}_${topicName ?? ""}_${subjectId ?? ""}`;
-  return cacheFirstFetch(cacheKey, () => fetchPublishedModuleExamUncached(block, moduleId, difficulty, topicName, subjectId), ONE_HOUR);
-}
-
-async function fetchPublishedModuleExamUncached(
   block: number,
   moduleId: string,
   difficulty?: Difficulty | "all",
@@ -1103,8 +1203,7 @@ async function fetchPublishedModuleExamUncached(
     if (!topicName) return list;
     return list.filter((item) => {
       const name = item.topicName || item.subheadingName || "General / No topic";
-      const nameMatches = name === topicName;
-      if (!nameMatches) return false;
+      if (name !== topicName) return false;
       // subjectId is optional for backwards compatibility, but should always be passed
       // by callers going forward — see PracticeSetup.tsx.
       if (subjectId) return item.subjectId === subjectId;
@@ -1112,44 +1211,26 @@ async function fetchPublishedModuleExamUncached(
     });
   };
 
+  const scope = (q: FirestoreQuestion) => q.block === block && q.moduleId === moduleId;
+
   try {
-    const clauses = [
-      where("block", "==", block),
-      where("moduleId", "==", moduleId),
-      where("status", "==", "published"),
-    ];
-    if (difficulty && difficulty !== "all") {
-      clauses.push(where("difficulty", "==", difficulty));
-    }
-
-    const q = query(collection(db, "questions"), ...clauses);
-    const snap = await getDocs(q);
-    const fsResults = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
-
-    const localQs = getLocalQuestions().filter((lq) => {
-      if (lq.block !== block || lq.moduleId !== moduleId || lq.status !== "published") return false;
-      if (difficulty && difficulty !== "all" && lq.difficulty !== difficulty) return false;
-      return true;
-    });
-
-    const defResults = DEFAULT_QUESTIONS.filter((dq) => {
-      if (dq.block !== block || dq.moduleId !== moduleId || dq.status !== "published") return false;
-      if (difficulty && difficulty !== "all" && dq.difficulty !== difficulty) return false;
-      return true;
-    });
-
-    const combined = applyTopicFilter(mergeQuestionSources(defResults, localQs, fsResults));
+    const base = await fetchScopedBase(
+      `pubModuleExamBase_${block}_${moduleId}`,
+      [where("block", "==", block), where("moduleId", "==", moduleId), where("status", "==", "published")],
+      scope,
+      scope
+    );
+    const combined = applyTopicFilter(byDifficulty(base, difficulty));
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedModuleExam failed, using default questions:", err);
   }
 
   return applyTopicFilter(
-    DEFAULT_QUESTIONS.filter((dq) => {
-      if (dq.block !== block || dq.moduleId !== moduleId || dq.status !== "published") return false;
-      if (difficulty && difficulty !== "all" && dq.difficulty !== difficulty) return false;
-      return true;
-    })
+    byDifficulty(
+      DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && scope(dq)),
+      difficulty
+    )
   );
 }
 
@@ -1158,50 +1239,25 @@ export async function fetchPublishedBlockExam(
   block: number,
   difficulty?: Difficulty | "all"
 ): Promise<FirestoreQuestion[]> {
-  const cacheKey = `pubBlockExam_${block}_${difficulty ?? ""}`;
-  return cacheFirstFetch(cacheKey, () => fetchPublishedBlockExamUncached(block, difficulty), ONE_HOUR);
-}
+  const scope = (q: FirestoreQuestion) => q.block === block;
 
-async function fetchPublishedBlockExamUncached(
-  block: number,
-  difficulty?: Difficulty | "all"
-): Promise<FirestoreQuestion[]> {
   try {
-    const clauses = [
-      where("block", "==", block),
-      where("status", "==", "published"),
-    ];
-    if (difficulty && difficulty !== "all") {
-      clauses.push(where("difficulty", "==", difficulty));
-    }
-
-    const q = query(collection(db, "questions"), ...clauses);
-    const snap = await getDocs(q);
-    const fsResults = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
-
-    const localQs = getLocalQuestions().filter((lq) => {
-      if (lq.block !== block || lq.status !== "published") return false;
-      if (difficulty && difficulty !== "all" && lq.difficulty !== difficulty) return false;
-      return true;
-    });
-
-    const defResults = DEFAULT_QUESTIONS.filter((dq) => {
-      if (dq.block !== block || dq.status !== "published") return false;
-      if (difficulty && difficulty !== "all" && dq.difficulty !== difficulty) return false;
-      return true;
-    });
-
-    const combined = mergeQuestionSources(defResults, localQs, fsResults);
+    const base = await fetchScopedBase(
+      `pubBlockExamBase_${block}`,
+      [where("block", "==", block), where("status", "==", "published")],
+      scope,
+      scope
+    );
+    const combined = byDifficulty(base, difficulty);
     if (combined.length > 0) return combined;
   } catch (err) {
     console.warn("Firestore fetchPublishedBlockExam failed, using default questions:", err);
   }
 
-  return DEFAULT_QUESTIONS.filter((dq) => {
-    if (dq.block !== block || dq.status !== "published") return false;
-    if (difficulty && difficulty !== "all" && dq.difficulty !== difficulty) return false;
-    return true;
-  });
+  return byDifficulty(
+    DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && scope(dq)),
+    difficulty
+  );
 }
 
 /** Live per-block published-question counts for a module */
@@ -1286,9 +1342,13 @@ export function subscribePublishedQuestions(cb: (questions: FirestoreQuestion[])
         q,
         (snap) => {
           const deleted = getDeletedQuestionIds();
-          const fsQuestions = snap.docs
-            .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
-            .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
+          const rawQuestions = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+          // Let the practice fetchers reuse this download instead of querying Firestore again.
+          if (!snap.metadata.fromCache) {
+            liveBank = rawQuestions;
+            liveBankAt = Date.now();
+          }
+          const fsQuestions = rawQuestions.filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
           const localQs = getLocalQuestions().filter(
             (lq) => lq.status === "published" && !deleted.has(lq.id.toLowerCase().trim())
           );
@@ -1311,7 +1371,25 @@ export function subscribePublishedQuestions(cb: (questions: FirestoreQuestion[])
         }
       );
     },
-    cb
+    cb,
+    undefined,
+    // The Subjects/SubjectDetail views only group by block/module/subject, so persist just
+    // those fields. Caching full question text + explanations for the whole bank blew past
+    // the localStorage quota, which silently disabled this cache.
+    (qs) =>
+      qs.map((q) => ({
+        id: q.id,
+        subjectId: q.subjectId,
+        moduleId: q.moduleId,
+        moduleName: q.moduleName,
+        block: q.block,
+        difficulty: q.difficulty,
+        status: q.status,
+        q: "",
+        options: [],
+        correct: 0,
+        explanation: "",
+      }))
   );
 }
 
@@ -1386,6 +1464,149 @@ function subscribeCurriculumCountsLive(cb: (counts: CurriculumCounts) => void) {
     }
   );
 }
+// ---------------------------------------------------------------------------
+// Lightweight homepage index (Practice Library).
+//
+// The Practice Library used to download the ENTIRE published bank twice (once for the module
+// list, once for the counts) just to draw a few numbers. These helpers keep the first paint
+// tiny and only pull real question documents for the one block the student is looking at:
+//  - subscribeBlockCounts / subscribeSubjectCounts: Firestore count() aggregations. They
+//    return just a number per block/subject — no question documents are downloaded at all.
+//  - subscribeBlockOutline: the module -> subject breakdown for ONE block, loaded when that
+//    block is selected. Only a slim outline (ids, names, counts) is cached, so it never
+//    threatens the localStorage quota.
+// The full MCQs are still only fetched when a module/subject is opened (fetchPublished*).
+// All three show the last cached value instantly, then refresh it in the background.
+// ---------------------------------------------------------------------------
+
+async function countPublished(...clauses: QueryConstraint[]): Promise<number> {
+  const q = query(collection(db, "questions"), where("status", "==", "published"), ...clauses);
+  try {
+    const snap = await getCountFromServer(q);
+    return snap.data().count;
+  } catch (err) {
+    // Aggregation unavailable (older SDK / transient) — fall back to counting documents.
+    console.warn("count() aggregation failed, counting documents instead:", err);
+    const snap = await getDocs(q);
+    return snap.size;
+  }
+}
+
+/** Locally-saved + seed published questions (these never live in Firestore). */
+function localAndSeedPublished(): FirestoreQuestion[] {
+  const deleted = getDeletedQuestionIds();
+  const local = getLocalQuestions().filter((lq) => lq.status === "published");
+  const defs = DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && !deleted.has(dq.id.toLowerCase().trim()));
+  return mergeQuestionSources(defs, local, []);
+}
+
+/** Published-question count per block (numbers only — no question documents downloaded). */
+export function subscribeBlockCounts(blocks: number[], cb: (counts: Record<number, number>) => void) {
+  const extras = () => {
+    const out: Record<number, number> = {};
+    localAndSeedPublished().forEach((q) => {
+      if (q.block) out[q.block] = (out[q.block] || 0) + 1;
+    });
+    return out;
+  };
+  return cacheThenFetch<Record<number, number>>(
+    "idx_blockCounts",
+    async () => {
+      const counts = await Promise.all(blocks.map((b) => countPublished(where("block", "==", b))));
+      const extra = extras();
+      const out: Record<number, number> = {};
+      blocks.forEach((b, i) => {
+        out[b] = counts[i] + (extra[b] || 0);
+      });
+      return out;
+    },
+    cb,
+    extras
+  );
+}
+
+/** Published-question count per subject (numbers only — no question documents downloaded). */
+export function subscribeSubjectCounts(subjectIds: string[], cb: (counts: Record<string, number>) => void) {
+  const extras = () => {
+    const out: Record<string, number> = {};
+    localAndSeedPublished().forEach((q) => {
+      if (q.subjectId) out[q.subjectId] = (out[q.subjectId] || 0) + 1;
+    });
+    return out;
+  };
+  return cacheThenFetch<Record<string, number>>(
+    "idx_subjectCounts",
+    async () => {
+      const counts = await Promise.all(subjectIds.map((id) => countPublished(where("subjectId", "==", id))));
+      const extra = extras();
+      const out: Record<string, number> = {};
+      subjectIds.forEach((id, i) => {
+        out[id] = counts[i] + (extra[id] || 0);
+      });
+      return out;
+    },
+    cb,
+    extras
+  );
+}
+
+export interface BlockOutline {
+  block: number;
+  total: number;
+  modules: {
+    id: string;
+    name: string;
+    description?: string;
+    total: number;
+    subjects: { subjectId: string; count: number }[];
+  }[];
+}
+
+function outlineFromQuestions(block: number, questions: FirestoreQuestion[]): BlockOutline {
+  const modules = new Map<string, BlockOutline["modules"][number]>();
+  let total = 0;
+  questions.forEach((q) => {
+    if (q.status !== "published" || q.block !== block) return;
+    total++;
+    const name = q.moduleName || "General Module";
+    const modId = q.moduleId || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    let mod = modules.get(modId);
+    if (!mod) {
+      mod = { id: modId, name, total: 0, subjects: [] };
+      modules.set(modId, mod);
+    }
+    mod.total++;
+    const subj = mod.subjects.find((s) => s.subjectId === q.subjectId);
+    if (subj) subj.count++;
+    else mod.subjects.push({ subjectId: q.subjectId, count: 1 });
+  });
+  return { block, total, modules: Array.from(modules.values()) };
+}
+
+/** Module -> subject breakdown for ONE block, loaded when that block is selected. */
+export function subscribeBlockOutline(block: number, cb: (outline: BlockOutline) => void) {
+  const localOnly = () => outlineFromQuestions(block, localAndSeedPublished().filter((q) => q.block === block));
+  return cacheThenFetch<BlockOutline>(
+    `idx_blockOutline_${block}`,
+    async () => {
+      const snap = await getDocs(
+        query(collection(db, "questions"), where("status", "==", "published"), where("block", "==", block))
+      );
+      const deleted = getDeletedQuestionIds();
+      const fsQuestions = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
+      const local = getLocalQuestions().filter((lq) => lq.status === "published" && lq.block === block);
+      const defs = DEFAULT_QUESTIONS.filter(
+        (dq) => dq.status === "published" && dq.block === block && !deleted.has(dq.id.toLowerCase().trim())
+      );
+      return outlineFromQuestions(block, mergeQuestionSources(defs, local, fsQuestions));
+    },
+    cb,
+    localOnly
+  );
+}
+
 export async function searchGlobalQuestions(queryText: string): Promise<FirestoreQuestion[]> {
   try {
     const q = query(collection(db, "questions"), where("status", "==", "published"));

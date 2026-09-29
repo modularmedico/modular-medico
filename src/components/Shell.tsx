@@ -111,7 +111,7 @@ export default function Shell() {
 
   return (
     <div style={{ backgroundColor: t.bg, color: t.text, fontFamily: FONT_BODY, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      {/* Promo popup: "3 blocks for PKR 499" via WhatsApp — shows on every page load */}
+      {/* Promo popup: "Get Block 1, 2 & 3 for PKR 499" via WhatsApp — shows on every page load */}
       <BlocksOfferModal />
 
       {/* Dynamic Auto-Fading Top Scroll Progress Bar */}

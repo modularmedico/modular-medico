@@ -31,8 +31,12 @@ export default function SubjectDetail() {
   const isAdmin = useAppStore((s) => s.isAdmin);
   const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
   const freeBlocks = useAppStore((s) => s.freeBlocks);
+  const freeSubjects = useAppStore((s) => s.freeSubjects);
   const isBlockUnlocked = (block: number) =>
     freeBlocks.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
+  // Admin can leave a subject free inside a paid block.
+  const isSubjectOpen = (block: number, subject: string) =>
+    isBlockUnlocked(block) || !!freeSubjects[block]?.includes(subject);
   const t = isDark ? THEME.dark : THEME.light;
   const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
   const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);
@@ -89,7 +93,7 @@ export default function SubjectDetail() {
 
       const blockDef = blockDefs.find((b) => b.block === q.block);
       const count = counts.subjectInModuleCounts[`${q.block}-${modId}-${subjectId}`] || 0;
-      const locked = !isBlockUnlocked(q.block);
+      const locked = !isSubjectOpen(q.block, subjectId);
 
       moduleAppearances.push({
         block:

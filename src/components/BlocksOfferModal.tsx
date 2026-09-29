@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { X, MessageCircle, Layers } from "lucide-react";
 import { THEME, FONT_DISPLAY, FONT_BODY } from "../theme";
 import { useAppStore } from "../store/useAppStore";
+import { OFFER_PRICE, OFFER_POPUP_TITLE, OFFER_WHATSAPP_TEXT } from "../data/offer";
 
 // Admin's WhatsApp number for handling this promo purchase manually.
 const OFFER_WHATSAPP_NUMBER = "923150651584"; // 0315 0651584, no punctuation for wa.me
 
 /**
- * Promo popup advertising "all 3 blocks for PKR 499", shown once per page
+ * Promo popup advertising "Get Block 1, 2 & 3 for PKR 499", shown once per page
  * load/refresh on top of the student-facing app (mounted in Shell).
  */
 export default function BlocksOfferModal() {
@@ -27,7 +28,7 @@ export default function BlocksOfferModal() {
   if (!open) return null;
 
   const handleMessage = () => {
-    const text = "Hi! I'd like to buy access to all 3 blocks for PKR 499.";
+    const text = OFFER_WHATSAPP_TEXT;
     const waUrl = `https://wa.me/${OFFER_WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
     window.open(waUrl, "_blank", "noopener,noreferrer");
   };
@@ -60,14 +61,14 @@ export default function BlocksOfferModal() {
         </div>
 
         <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 20, color: t.text }}>
-          Get access to all 3 blocks
+          {OFFER_POPUP_TITLE}
         </h2>
         <p style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 30, color: t.gold, marginTop: 4 }}>
-          Just PKR 499
+          Just PKR {OFFER_PRICE}
         </p>
 
         <p className="mt-2 text-sm" style={{ color: t.textMuted }}>
-          To buy the blocks, message us on WhatsApp:
+          To get Blocks 1, 2 & 3, message us on WhatsApp:
         </p>
         <p className="mt-1 text-sm font-bold" style={{ color: t.text }}>
           0315 0651584

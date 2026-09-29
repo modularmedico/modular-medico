@@ -47,6 +47,11 @@ interface AppState {
   freeBlocks: number[];
   setFreeBlocks: (blocks: number[]) => void;
 
+  // Subjects that stay free inside otherwise-paid blocks: { [block]: subjectIds[] }.
+  // Kept live by subscribeFreeSubjects() in App.tsx (Firestore settings/freeSubjects).
+  freeSubjects: Record<number, string[]>;
+  setFreeSubjects: (map: Record<number, string[]>) => void;
+
   session: QuizSession | null;
   startSession: (setRef: ActiveSetRef, config: PracticeConfig) => void;
   updateSession: (patch: Partial<QuizSession>) => void;
@@ -99,6 +104,8 @@ export const useAppStore = create<AppState>()(
 
       freeBlocks: FREE_BLOCKS,
       setFreeBlocks: (blocks) => set({ freeBlocks: blocks }),
+      freeSubjects: {},
+      setFreeSubjects: (map) => set({ freeSubjects: map }),
 
       session: null,
       startSession: (setRef, config) =>
@@ -134,6 +141,7 @@ export const useAppStore = create<AppState>()(
         displayName: s.displayName,
         profile: s.profile,
         freeBlocks: s.freeBlocks,
+        freeSubjects: s.freeSubjects,
         session: s.session,
         lastResult: s.lastResult,
       }),
@@ -167,4 +175,19 @@ export const useIsBlockUnlocked = (block: number) =>
       if (!s.profile.premiumExpiry || s.profile.premiumExpiry > Date.now()) return true;
     }
     return !!s.profile?.unlockedBlocks?.includes(block);
+  });
+
+/**
+ * Like useIsBlockUnlocked, but also true when an admin marked this specific
+ * subject as free inside the (paid) block — see Admin > Manage Access.
+ */
+export const useIsSubjectUnlocked = (block: number, subjectId: string | null | undefined) =>
+  useAppStore((s) => {
+    if (s.freeBlocks.includes(block)) return true;
+    if (s.isAdmin) return true;
+    if (s.profile?.premium) {
+      if (!s.profile.premiumExpiry || s.profile.premiumExpiry > Date.now()) return true;
+    }
+    if (s.profile?.unlockedBlocks?.includes(block)) return true;
+    return !!subjectId && !!s.freeSubjects[block]?.includes(subjectId);
   });
