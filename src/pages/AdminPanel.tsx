@@ -36,6 +36,7 @@ import {
   TrendingUp,
   Lock,
   Unlock,
+  ClipboardList,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Card from "../components/Card";
@@ -98,6 +99,7 @@ import {
 } from "../services/siteStats";
 import { parseBracketFormat } from "../utils/parseBracketFormat";
 import FreeSubjectsManager from "../components/admin/FreeSubjectsManager";
+import TestSessionsManager from "../components/admin/TestSessionsManager";
 import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreStudyNote, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 
 const ADMIN_TABS = [
@@ -109,6 +111,7 @@ const ADMIN_TABS = [
   { id: "manage_ospe_book", label: "Manage OSPE Material", icon: Library },
   { id: "add_study_notes", label: "Add Study Notes", icon: GraduationCap },
   { id: "manage_study_notes", label: "Manage Study Notes", icon: FolderTree },
+  { id: "test_sessions", label: "Test Sessions", icon: ClipboardList },
   { id: "manage_access", label: "Manage Access", icon: Users },
   { id: "site_stats", label: "Site Visits", icon: BarChart3 },
 ] as const;
@@ -3395,6 +3398,8 @@ export default function AdminPanel() {
       {/* ===================================================================== */}
       {/* TAB: MANAGE ACCESS — per-account Block unlocks                        */}
       {/* ===================================================================== */}
+      {activeTab === "test_sessions" && <TestSessionsManager t={t} />}
+
       {activeTab === "manage_access" && (
         <div className="flex flex-col gap-5">
           <FreeSubjectsManager />

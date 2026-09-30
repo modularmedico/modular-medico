@@ -33,6 +33,7 @@ export default function Results() {
   const pct = Math.round((correct / answers.length) * 100);
   const scoreColor = pct >= 80 ? t.green : pct >= 50 ? t.gold : t.red;
   const isCustom = setRef.block === 0;
+  const isTest = setRef.moduleId.startsWith("test-");
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-6">
@@ -94,9 +95,11 @@ export default function Results() {
           t={t}
           full
           icon={RotateCcw}
-          onClick={() => navigate(isCustom ? "/builder" : `/subjects/${setRef.subjectId}/${setRef.moduleId}/${setRef.block}`)}
+          onClick={() =>
+            navigate(isTest ? "/tests" : isCustom ? "/builder" : `/subjects/${setRef.subjectId}/${setRef.moduleId}/${setRef.block}`)
+          }
         >
-          Practice again
+          {isTest ? "Back to tests" : "Practice again"}
         </Btn>
       </div>
       {isLoggedIn && !isPremium && (

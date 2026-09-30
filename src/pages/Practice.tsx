@@ -120,6 +120,7 @@ export default function Practice() {
 
   const { setRef, config, queue, pos, record, bookmarked, requeueCount, skipped } = session;
   const isOmr = config.mode === "omr" || config.mode === "exam";
+  const exitTo = setRef.moduleId.startsWith("test-") ? "/tests" : "/subjects";
   const qIndex = queue[pos];
   const question = setRef.questions[qIndex];
   const totalSteps = queue.length;
@@ -372,7 +373,7 @@ export default function Practice() {
           <p style={{ color: t.textMuted, marginTop: 8 }}>
             This mode features a split-screen layout that requires a wider screen. Please switch to a desktop or tablet device in landscape.
           </p>
-          <Btn t={t} onClick={() => { clearSession(); navigate("/subjects"); }} style={{ marginTop: 24 }}>
+          <Btn t={t} onClick={() => { clearSession(); navigate(exitTo); }} style={{ marginTop: 24 }}>
             Exit Practice
           </Btn>
         </div>
@@ -382,7 +383,7 @@ export default function Practice() {
           {/* Left Side: MCQs */}
           <div className="flex-1 overflow-y-auto pr-4 pb-10">
             <div className="flex items-center justify-between mb-6 sticky top-0 z-10 py-3" style={{ backgroundColor: `${t.bg}F2`, backdropFilter: "blur(8px)" }}>
-               <button onClick={() => { clearSession(); navigate("/subjects"); }} className="flex items-center gap-1 text-sm font-bold" style={{ color: t.textMuted }}>
+               <button onClick={() => { clearSession(); navigate(exitTo); }} className="flex items-center gap-1 text-sm font-bold" style={{ color: t.textMuted }}>
                  <ChevronLeft size={15} /> Exit
                </button>
                <span style={{ fontFamily: FONT_MONO, fontSize: 12, color: t.textFaint }}>
@@ -533,7 +534,7 @@ export default function Practice() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
       <div className="flex items-center justify-between">
-        <button onClick={() => { clearSession(); navigate("/subjects"); }} className="flex items-center gap-1 text-sm font-bold" style={{ color: t.textMuted }}>
+        <button onClick={() => { clearSession(); navigate(exitTo); }} className="flex items-center gap-1 text-sm font-bold" style={{ color: t.textMuted }}>
           <ChevronLeft size={15} /> Exit
         </button>
         <span style={{ fontFamily: FONT_MONO, fontSize: 12, color: t.textFaint }}>

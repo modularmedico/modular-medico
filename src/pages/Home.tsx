@@ -23,6 +23,7 @@ import {
   NotebookText,
   ShoppingBag,
   Crown,
+  ClipboardList,
 } from "lucide-react";
 import Pill from "../components/Pill";
 import Card from "../components/Card";
@@ -162,6 +163,30 @@ export default function Home() {
             </Pill>
           ))}
         </div>
+      </section>
+
+      {/* Test sessions banner */}
+      <section
+        className="flex flex-col items-start justify-between gap-4 rounded-3xl px-6 py-6 sm:flex-row sm:items-center md:px-8"
+        style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.teal}` }}
+      >
+        <div className="flex items-center gap-4">
+          <div
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
+            style={{ backgroundColor: `${t.teal}22` }}
+          >
+            <ClipboardList size={24} color={t.teal} />
+          </div>
+          <div>
+            <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 20 }}>Join our test sessions</div>
+            <div style={{ color: t.textMuted, fontSize: 13.5, marginTop: 2 }}>
+              Timed, exam-style tests curated by our faculty. Take one and see where you stand.
+            </div>
+          </div>
+        </div>
+        <Btn t={t} icon={ArrowRight} onClick={() => navigate("/tests")}>
+          Join a test
+        </Btn>
       </section>
 
       {/* Quick Links — Lectures, OSPE Material, Books & Study Notes, Shop */}

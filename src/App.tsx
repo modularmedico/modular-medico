@@ -9,6 +9,7 @@ import Subjects from "./pages/Subjects";
 import SubjectDetail from "./pages/SubjectDetail";
 import PracticeSetup from "./pages/PracticeSetup";
 import Practice from "./pages/Practice";
+import Tests from "./pages/Tests";
 import Search from "./pages/Search";
 import Results from "./pages/Results";
 import Builder from "./pages/Builder";
@@ -97,6 +98,7 @@ export default function App() {
           <Route path="/subjects/:subjectId" element={<SubjectDetail />} />
           <Route path="/subjects/:subjectId/:moduleId/:block" element={<PracticeSetup />} />
           <Route path="/practice" element={<Practice />} />
+          <Route path="/tests" element={<Tests />} />
           <Route path="/search" element={<Search />} />
           <Route path="/results" element={<Results />} />
           <Route path="/builder" element={<Builder />} />

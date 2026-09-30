@@ -224,3 +224,37 @@ export interface ImportResult {
   correct?: number;
   explanation?: string;
 }
+
+/** One MCQ inside a Test Session, snapshotted from the question bank when the admin added it. */
+export interface TestSessionQuestion extends MCQ {
+  /** Original bank question id — used to avoid adding the same MCQ twice. */
+  sourceId: string;
+  subjectId: string;
+  moduleId: string;
+  moduleName: string;
+  block: number;
+  topicName?: string | null;
+}
+
+/** A group of MCQs added in one go (Module + Subject + Topic + quantity), shown in the admin list. */
+export interface TestSessionSource {
+  block: number;
+  moduleName: string;
+  subjectId: string | null;
+  topicName: string | null;
+  count: number;
+}
+
+/**
+ * A Test Session, stored in the Firestore `test_sessions` collection.
+ * MCQs are copied into the doc (snapshot) so students read one document and the
+ * test stays stable even if the bank is edited later.
+ */
+export interface TestSessionDoc {
+  id: string;
+  name: string;
+  status: QuestionStatus; // "draft" hidden from students, "published" visible on /tests
+  questions: TestSessionQuestion[];
+  sources: TestSessionSource[];
+  createdAt: number;
+}

@@ -93,6 +93,14 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // Test Sessions: curated MCQ tests built in the admin "Test Sessions" tab.
+    // Students may only read published tests (their query must filter on
+    // status == 'published'); admins can read/write everything, drafts included.
+    match /test_sessions/{testId} {
+      allow get, list: if resource.data.status == 'published' || isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
     // ---------------------------------------------------------------
     // App-wide settings, e.g. settings/freeBlocks ({ blocks: number[] }),
     // which Blocks are free for everyone. Readable by anyone (guests need

@@ -20,6 +20,7 @@ import {
   ShoppingBag,
   BookMarked,
   NotebookText,
+  ClipboardList,
 } from "lucide-react";
 import Logomark from "./Logomark";
 import Footer from "./Footer";
@@ -30,7 +31,7 @@ import { logOut as firebaseLogOut } from "../services/auth";
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: HomeIcon, end: true },
-  { to: "/subjects", label: "Practice", icon: BookOpen },
+  { to: "/tests", label: "Test", icon: ClipboardList },
   { to: "/builder", label: "Build", icon: Wand2, center: true },
   { to: "/bookmarks", label: "Saved", icon: Bookmark },
   { to: "/profile", label: "Profile", icon: User },
@@ -39,6 +40,7 @@ const NAV_ITEMS = [
 // Secondary links — shown in the hamburger drawer (mobile) and desktop sidebar, but
 // not in the 5-slot bottom mobile tab bar (kept lean on purpose).
 const SECONDARY_NAV_ITEMS = [
+  { to: "/subjects", label: "Practice", icon: BookOpen },
   { to: "/lectures", label: "Lectures", icon: Video },
   { to: "/ospe-books", label: "OSPE Material", icon: BookMarked },
   { to: "/study-notes", label: "Books & Study Notes", icon: NotebookText },
