@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { ClipboardList, Plus, Trash2, Eye, EyeOff, Loader2, ChevronDown, ChevronUp, X, AlertTriangle } from "lucide-react";
+import { ClipboardList, Plus, Trash2, Eye, EyeOff, Loader2, ChevronDown, ChevronUp, X, AlertTriangle, Search, CheckSquare, Square } from "lucide-react";
 import Card from "../Card";
 import Pill from "../Pill";
 import Btn from "../Btn";
 import { FONT_DISPLAY, FONT_MONO, type ThemeTokens } from "../../theme";
-import { DEFAULT_BLOCK_DEFINITIONS, SUBJECT_META, TOTAL_BLOCKS, type BlockDefinition } from "../../data/subjects";
-import {
-  subscribeBlockDefinitions,
-  subscribePublishedModuleQuestions,
-} from "../../services/adminContent";
+import { MASTER_MODULES, SUBJECT_LIST, SUBJECT_META, TOTAL_BLOCKS } from "../../data/subjects";
+import { subscribeScopedQuestions } from "../../services/adminContent";
 import {
   addQuestionsToTestSession,
   createTestSession,
@@ -17,20 +14,17 @@ import {
   setTestSessionStatus,
   subscribeAllTestSessions,
 } from "../../services/testSessions";
-import type { FirestoreQuestion, TestSessionDoc, TestSessionQuestion } from "../../types";
+import type { Difficulty, FirestoreQuestion, QuestionStatus, TestSessionDoc, TestSessionQuestion } from "../../types";
 
 const NO_TOPIC = "General / No topic";
 const topicOf = (q: FirestoreQuestion) => q.topicName || q.subheadingName || NO_TOPIC;
 const subjectLabel = (id: string) => SUBJECT_META[id as keyof typeof SUBJECT_META]?.label || id;
-
-function shuffle<T>(list: T[]): T[] {
-  const a = [...list];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
+// Same slug scheme used everywhere else this app derives a moduleId from a Module
+// name (see AdminPanel's Manage MCQs Module filter and the Add-MCQ form) — this is
+// the actual format stored on FirestoreQuestion.moduleId. The old build here instead
+// pulled "mod-4"-style ids out of DEFAULT_BLOCK_DEFINITIONS, which never matches a
+// real question in Firestore, so the pool always came back empty.
+const moduleSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 export default function TestSessionsManager({ t }: { t: ThemeTokens }) {
   const [tests, setTests] = useState<TestSessionDoc[]>([]);
@@ -232,22 +226,31 @@ function TestEditor({
   test: TestSessionDoc;
   onNotice: (n: { tone: "ok" | "err"; text: string } | null) => void;
 }) {
-  const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
+  // Filters — deliberately the same shape as the Manage MCQs screen (Block,
+  // Module, Subject, Difficulty, Status, Subheading, search), and Block + Module
+  // + Subject are all required before anything loads, exactly like Manage MCQs'
+  // manageScopeReady gate. This is what makes the pool line up with what Manage
+  // MCQs shows: previously this screen built its Module dropdown from
+  // block_definitions/DEFAULT_BLOCK_DEFINITIONS ("mod-4"-style ids) and queried
+  // Firestore with that id, but every question actually stores a slugified-name
+  // moduleId (e.g. "cardiovascular-i") the way the Manage MCQs and Add-MCQ forms
+  // create it — so the query always matched zero documents and both the MCQ list
+  // and the Subheading dropdown (built from that same empty pool) came back empty.
   const [block, setBlock] = useState<number>(0);
   const [moduleId, setModuleId] = useState("");
-  const [subjectId, setSubjectId] = useState(""); // "" = all subjects in the module
-  const [topic, setTopic] = useState(""); // "" = all topics
-  const [quantity, setQuantity] = useState(10);
+  const [subjectId, setSubjectId] = useState("");
+  const [difficulty, setDifficulty] = useState<Difficulty | "all">("all");
+  const [status, setStatus] = useState<QuestionStatus | "all">("all");
+  const [topic, setTopic] = useState("all");
+  const [search, setSearch] = useState("");
   const [pool, setPool] = useState<FirestoreQuestion[]>([]);
   const [poolLoading, setPoolLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [showList, setShowList] = useState(false);
 
-  useEffect(() => subscribeBlockDefinitions(setBlockDefs), []);
-
-  const blockDef = blockDefs.find((b) => b.block === block);
-  const modules = blockDef?.modules || [];
-  const moduleDef = modules.find((m) => m.id === moduleId);
+  const moduleName = MASTER_MODULES.find((m) => m.id === moduleId)?.name || "";
+  const scopeReady = !!block && !!moduleId && !!subjectId;
 
   // Reset the dependent pickers whenever a parent one changes.
   useEffect(() => {
@@ -257,25 +260,23 @@ function TestEditor({
     setSubjectId("");
   }, [moduleId]);
   useEffect(() => {
-    setTopic("");
+    setTopic("all");
   }, [moduleId, subjectId]);
 
-  // Load the published MCQs for the chosen scope via a live listener (same approach
-  // as the Manage MCQs screen's subscribeScopedQuestions) rather than the cached
-  // fetchPublishedBlock/fetchPublishedModuleExam fetchers. Those cache each scope's
-  // result for an hour, so an admin who publishes MCQs and immediately opens "Add
-  // MCQs" could keep seeing a stale "0 available" here for up to an hour. A live
-  // onSnapshot has no such staleness window.
+  // Same live subscribeScopedQuestions listener the Manage MCQs tab uses (all
+  // statuses — Status is then just another client-side filter below, matching
+  // Manage MCQs) instead of a published-only fetch, so this always sees exactly
+  // what Manage MCQs sees for the same Block/Module/Subject.
   useEffect(() => {
-    if (!block || !moduleId) {
+    if (!scopeReady) {
       setPool([]);
       return;
     }
     setPoolLoading(true);
-    const unsub = subscribePublishedModuleQuestions(
-      block,
+    const unsub = subscribeScopedQuestions(
+      subjectId,
       moduleId,
-      subjectId || null,
+      block,
       (list) => {
         setPool(list);
         setPoolLoading(false);
@@ -283,31 +284,69 @@ function TestEditor({
       () => setPoolLoading(false)
     );
     return () => unsub();
-  }, [block, moduleId, subjectId]);
+  }, [scopeReady, block, moduleId, subjectId]);
 
   const alreadyIn = useMemo(() => new Set(test.questions.map((q) => q.sourceId)), [test.questions]);
 
-  const topicCounts = useMemo(() => {
-    const counts = new Map<string, number>();
+  // Clear any selection that's no longer valid whenever the scope changes.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [block, moduleId, subjectId]);
+
+  const availableTopicNames = useMemo(() => {
+    const names = new Set<string>();
     pool.forEach((q) => {
       if (alreadyIn.has(q.id)) return;
-      counts.set(topicOf(q), (counts.get(topicOf(q)) || 0) + 1);
+      names.add(topicOf(q));
     });
-    return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    return Array.from(names).sort();
   }, [pool, alreadyIn]);
 
-  const available = useMemo(
-    () => pool.filter((q) => !alreadyIn.has(q.id) && (!topic || topicOf(q) === topic)),
-    [pool, alreadyIn, topic]
-  );
+  const filtered = useMemo(() => {
+    return pool.filter((q) => {
+      if (alreadyIn.has(q.id)) return false;
+      if (difficulty !== "all" && q.difficulty !== difficulty) return false;
+      if (status !== "all" && q.status !== status) return false;
+      if (topic !== "all" && topicOf(q) !== topic) return false;
+      if (search.trim()) {
+        const s = search.toLowerCase();
+        const inQ = q.q.toLowerCase().includes(s);
+        const inOpts = q.options.some((o) => o.toLowerCase().includes(s));
+        const inExp = q.explanation?.toLowerCase().includes(s);
+        const inSub = topicOf(q).toLowerCase().includes(s);
+        if (!inQ && !inOpts && !inExp && !inSub) return false;
+      }
+      return true;
+    });
+  }, [pool, alreadyIn, difficulty, status, topic, search]);
 
-  const qty = Math.max(0, Math.min(quantity || 0, available.length));
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allVisibleSelected = filtered.length > 0 && filtered.every((q) => selected.has(q.id));
+  const toggleSelectAllVisible = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        filtered.forEach((q) => next.delete(q.id));
+      } else {
+        filtered.forEach((q) => next.add(q.id));
+      }
+      return next;
+    });
+  };
 
   const handleAdd = async () => {
-    if (!moduleDef || qty === 0 || adding) return;
+    if (selected.size === 0 || adding) return;
     setAdding(true);
     try {
-      const picked = shuffle(available).slice(0, qty);
+      const picked = pool.filter((q) => selected.has(q.id));
       const snapshot: TestSessionQuestion[] = picked.map((q) => ({
         sourceId: q.id,
         q: q.q,
@@ -316,17 +355,18 @@ function TestEditor({
         explanation: q.explanation || "",
         subjectId: q.subjectId,
         moduleId: q.moduleId,
-        moduleName: q.moduleName || moduleDef.name,
+        moduleName: q.moduleName || moduleName,
         block: q.block,
         topicName: q.topicName || q.subheadingName || null,
       }));
       await addQuestionsToTestSession(test, snapshot, {
         block,
-        moduleName: moduleDef.name,
+        moduleName,
         subjectId: subjectId || null,
-        topicName: topic || null,
+        topicName: topic !== "all" ? topic : null,
         count: snapshot.length,
       });
+      setSelected(new Set());
       onNotice({ tone: "ok", text: `Added ${snapshot.length} MCQ${snapshot.length !== 1 ? "s" : ""} to "${test.name}".` });
     } catch (e) {
       onNotice({ tone: "err", text: e instanceof Error ? e.message : "Couldn't add MCQs." });
@@ -351,11 +391,25 @@ function TestEditor({
       <div>
         <h3 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>Add MCQs from the question bank</h3>
         <p className="text-xs" style={{ color: t.textFaint, marginTop: 2 }}>
-          MCQs are picked at random from published questions and never added twice.
+          Same Block / Module / Subject / Subheading scope as Manage MCQs. Pick a Block, Module and Subject, then
+          tick the MCQs you want and add them.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* Search */}
+      <div className="relative">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search question text, options, or subheading..."
+          className="w-full rounded-2xl pl-9 pr-4 py-2.5 text-sm outline-none"
+          style={selectStyle}
+        />
+        <Search size={15} className="absolute left-3 top-3" color={t.textFaint} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div>
           <label className={labelCls} style={{ color: t.textFaint }}>Block</label>
           <select
@@ -380,8 +434,8 @@ function TestEditor({
             style={selectStyle}
           >
             <option value="">Select a Module&hellip;</option>
-            {modules.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+            {MASTER_MODULES.map((m) => (
+              <option key={m.id} value={moduleSlug(m.name)}>{m.name}</option>
             ))}
           </select>
         </div>
@@ -394,58 +448,136 @@ function TestEditor({
             className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none disabled:opacity-50"
             style={selectStyle}
           >
-            <option value="">All subjects</option>
-            {(moduleDef?.subjects || []).map((s) => (
+            <option value="">Select a Subject&hellip;</option>
+            {SUBJECT_LIST.map((s) => (
               <option key={s} value={s}>{subjectLabel(s)}</option>
             ))}
           </select>
         </div>
         <div>
-          <label className={labelCls} style={{ color: t.textFaint }}>Subheading</label>
+          <label className={labelCls} style={{ color: t.textFaint }}>Difficulty</label>
           <select
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            disabled={!moduleId || poolLoading}
-            className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none disabled:opacity-50"
+            value={difficulty}
+            onChange={(e) => setDifficulty(e.target.value as Difficulty | "all")}
+            className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
             style={selectStyle}
           >
-            <option value="">All subheadings</option>
-            {topicCounts.map(([name, n]) => (
-              <option key={name} value={name}>{name} ({n})</option>
-            ))}
+            <option value="all">All Difficulties</option>
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
           </select>
+        </div>
+        <div>
+          <label className={labelCls} style={{ color: t.textFaint }}>Status</label>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as QuestionStatus | "all")}
+            className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none"
+            style={selectStyle}
+          >
+            <option value="all">All Statuses</option>
+            <option value="published">Published</option>
+            <option value="draft">Draft</option>
+          </select>
+        </div>
+        <div>
+          <label className={labelCls} style={{ color: t.textFaint }}>Subheading</label>
+          {poolLoading ? (
+            <div
+              className="flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold"
+              style={{ ...selectStyle, color: t.textFaint }}
+            >
+              <Loader2 size={13} className="animate-spin" /> Loading&hellip;
+            </div>
+          ) : (
+            <select
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              disabled={!scopeReady}
+              className="w-full rounded-xl px-2.5 py-2 text-xs font-semibold outline-none disabled:opacity-50"
+              style={selectStyle}
+            >
+              <option value="all">All Subheadings</option>
+              {availableTopicNames.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="w-28">
-          <label className={labelCls} style={{ color: t.textFaint }}>Quantity</label>
-          <input
-            type="number"
-            min={1}
-            max={Math.max(1, available.length)}
-            value={quantity}
-            onChange={(e) => setQuantity(Number(e.target.value))}
-            className="w-full rounded-xl px-2.5 py-2 text-sm outline-none"
-            style={{ ...selectStyle, fontFamily: FONT_MONO }}
-          />
+      {/* Results bar + bulk select */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs font-bold" style={{ color: t.textMuted }}>
+          {!scopeReady
+            ? "Pick a Block, Module, and Subject above to load its MCQs"
+            : poolLoading
+            ? "Loading MCQs…"
+            : `Showing ${filtered.length} MCQs · ${selected.size} selected`}
+        </span>
+        {scopeReady && filtered.length > 0 && (
+          <button
+            onClick={toggleSelectAllVisible}
+            className="flex items-center gap-1.5 text-xs font-bold"
+            style={{ color: t.teal }}
+          >
+            {allVisibleSelected ? <CheckSquare size={14} /> : <Square size={14} />}
+            {allVisibleSelected ? "Unselect all shown" : "Select all shown"}
+          </button>
+        )}
+      </div>
+
+      {/* MCQ picker list */}
+      {scopeReady && !poolLoading && (
+        <div className="flex max-h-96 flex-col gap-2 overflow-y-auto pr-1">
+          {filtered.length === 0 ? (
+            <p className="py-6 text-center text-xs" style={{ color: t.textFaint }}>
+              No MCQs matched your current filters.
+            </p>
+          ) : (
+            filtered.map((q) => {
+              const isSelected = selected.has(q.id);
+              return (
+                <label
+                  key={q.id}
+                  className="flex cursor-pointer items-start gap-2.5 rounded-xl px-3 py-2.5 text-sm"
+                  style={{
+                    backgroundColor: isSelected ? `${t.teal}14` : t.surfaceAlt,
+                    border: `1.5px solid ${isSelected ? t.teal : t.border}`,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelected(q.id)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <div className="min-w-0">
+                    {q.q}
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px]" style={{ color: t.textFaint }}>
+                      <span>B{q.block} · {q.moduleName || moduleName} · {subjectLabel(q.subjectId)} · {topicOf(q)}</span>
+                      <Pill t={t} tone={q.status === "published" ? "green" : "muted"}>{q.status}</Pill>
+                      <Pill t={t} tone="muted">{q.difficulty}</Pill>
+                    </div>
+                  </div>
+                </label>
+              );
+            })
+          )}
         </div>
+      )}
+
+      <div className="flex items-center gap-3">
         <Btn
           t={t}
           icon={adding ? Loader2 : Plus}
           spin={adding}
-          disabled={!moduleId || poolLoading || qty === 0 || adding}
+          disabled={selected.size === 0 || adding}
           onClick={handleAdd}
         >
-          Add {qty > 0 ? qty : ""} MCQ{qty !== 1 ? "s" : ""}
+          Add {selected.size > 0 ? selected.size : ""} MCQ{selected.size !== 1 ? "s" : ""} to test
         </Btn>
-        <span className="pb-3 text-xs" style={{ color: t.textFaint }}>
-          {!moduleId
-            ? "Pick a Block and Module to see what's available."
-            : poolLoading
-            ? "Loading MCQs…"
-            : `${available.length} published MCQ${available.length !== 1 ? "s" : ""} available in this selection.`}
-        </span>
       </div>
 
       {/* What's already in the test */}
