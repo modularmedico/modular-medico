@@ -86,6 +86,24 @@ export default function PracticeSetup() {
   const [selectedModuleTopic, setSelectedModuleTopic] = useState<{ subjectId: string; name: string } | null>(null);
   const [moduleTopicsLoaded, setModuleTopicsLoaded] = useState(false);
 
+  // Block-wide topic picker — used when practicing a whole Block ("Full Exam"), which can
+  // span every module and subject in the block. Unlike the single-select Module and Subject
+  // pickers above, this one is multi-select: the learner can tick several subheadings across
+  // several subjects at once, so the label always shows the subject alongside the name (here
+  // in brackets) to keep two subjects' identically-named subheadings visually distinct.
+  const [blockTopicOptions, setBlockTopicOptions] = useState<{ subjectId: string; name: string }[]>([]);
+  const [selectedBlockTopics, setSelectedBlockTopics] = useState<Set<string>>(new Set());
+  const [blockTopicsLoaded, setBlockTopicsLoaded] = useState(false);
+  const blockTopicKey = (subjectId: string, name: string) => `${subjectId}::${name.toLowerCase()}`;
+  const toggleBlockTopic = (key: string) => {
+    setSelectedBlockTopics((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   // Force strict settings in Exam mode
   useEffect(() => {
     if (mode === "exam") {
@@ -207,6 +225,56 @@ export default function PracticeSetup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isModuleExam, block, moduleId]);
 
+  // Discover the distinct (subject, subheading) pairs used across every published question in
+  // this whole Block, so the "Full Exam" flow can offer the same narrowing the Module and
+  // Subject flows already have — across every module and subject at once.
+  useEffect(() => {
+    setSelectedBlockTopics(new Set());
+    setBlockTopicOptions([]);
+    if (!isFullBlock || !Number.isInteger(block)) {
+      setBlockTopicsLoaded(true);
+      return;
+    }
+    setBlockTopicsLoaded(false);
+    let cancelled = false;
+    fetchPublishedBlockExam(block).then((qs) => {
+      if (cancelled) return;
+      const seen = new Set<string>();
+      const options: { subjectId: string; name: string }[] = [];
+      qs.forEach((q) => {
+        const name = q.topicName || q.subheadingName || GENERAL_TOPIC_LABEL;
+        const key = blockTopicKey(q.subjectId, name);
+        if (seen.has(key)) return;
+        seen.add(key);
+        options.push({ subjectId: q.subjectId, name });
+      });
+      options.sort((a, b) => {
+        const subjA = SUBJECT_META[a.subjectId as keyof typeof SUBJECT_META]?.label || a.subjectId;
+        const subjB = SUBJECT_META[b.subjectId as keyof typeof SUBJECT_META]?.label || b.subjectId;
+        return subjA === subjB ? a.name.localeCompare(b.name) : subjA.localeCompare(subjB);
+      });
+      setBlockTopicOptions(options);
+      setBlockTopicsLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFullBlock, block]);
+
+  // Filters a set of full-block questions down to the selected subheadings (if any are
+  // selected); an empty selection means "include everything", same convention as the other
+  // pickers' "All Subheadings" option.
+  const filterByBlockTopics = (qs: { subjectId: string; topicName?: string; subheadingName?: string }[]) => {
+    if (selectedBlockTopics.size === 0) return qs;
+    return qs.filter((q) => {
+      const name = q.topicName || q.subheadingName || GENERAL_TOPIC_LABEL;
+      return selectedBlockTopics.has(blockTopicKey(q.subjectId, name));
+    });
+  };
+
+  const selectedBlockTopicObjs = blockTopicOptions.filter((o) => selectedBlockTopics.has(blockTopicKey(o.subjectId, o.name)));
+
   const moduleDisplayName = isFullBlock
     ? `${blockDef?.title || `Block ${block}`} (All Modules)`
     : isModuleExam
@@ -226,8 +294,9 @@ export default function PracticeSetup() {
     if (locked) return;
     if (isFullBlock) {
       fetchPublishedBlockExam(block).then((qs) => {
-        setCount(qs.length);
-        if (mode === "exam") setTimerSeconds(qs.length * 60);
+        const filtered = filterByBlockTopics(qs);
+        setCount(filtered.length);
+        if (mode === "exam") setTimerSeconds(filtered.length * 60);
       });
     } else if (isModuleExam) {
       fetchPublishedModuleExam(
@@ -257,6 +326,7 @@ export default function PracticeSetup() {
     mode,
     selectedTopicName,
     selectedModuleTopic,
+    selectedBlockTopics,
   ]);
 
   if (!Number.isInteger(block) || (!isFullBlock && !isModuleExam && !isSubjectInModule)) {
@@ -293,7 +363,7 @@ export default function PracticeSetup() {
     const diff = difficulty === "all" ? undefined : difficulty;
     let questions = [];
     if (isFullBlock) {
-      questions = await fetchPublishedBlockExam(block, diff);
+      questions = filterByBlockTopics(await fetchPublishedBlockExam(block, diff));
     } else if (isModuleExam) {
       questions = await fetchPublishedModuleExam(
         block,
@@ -319,7 +389,16 @@ export default function PracticeSetup() {
     };
 
     const title = isFullBlock
-      ? `Block ${block}: Full Exam`
+      ? `Block ${block}: Full Exam${
+          selectedBlockTopicObjs.length === 1
+            ? ` \u00b7 ${selectedBlockTopicObjs[0].name} (${
+                SUBJECT_META[selectedBlockTopicObjs[0].subjectId as keyof typeof SUBJECT_META]?.label ||
+                selectedBlockTopicObjs[0].subjectId
+              })`
+            : selectedBlockTopicObjs.length > 1
+            ? ` \u00b7 ${selectedBlockTopicObjs.length} subheadings selected`
+            : ""
+        }`
       : isModuleExam
       ? `Block ${block} \u00b7 ${targetModule?.name || moduleId}${
           selectedModuleTopic
@@ -553,6 +632,53 @@ export default function PracticeSetup() {
                   );
                 })}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Subheadings — Block-wide picker, shown when practicing a whole Block ("Full Exam")
+            that has published MCQs tagged with subheadings across its subjects. Unlike the
+            single-select pickers above, several subheadings can be ticked at once — each
+            option is a (subject, subheading) pair, labelled with its subject in brackets, so
+            two different subjects' identically-named subheadings are never conflated. */}
+        {isFullBlock && (blockTopicOptions.length > 0 || !blockTopicsLoaded) && (
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
+                Subheadings
+              </span>
+              {selectedBlockTopics.size > 0 && (
+                <button
+                  onClick={() => setSelectedBlockTopics(new Set())}
+                  className="text-[11px] font-bold underline"
+                  style={{ color: t.purple }}
+                >
+                  Clear ({selectedBlockTopics.size})
+                </button>
+              )}
+            </div>
+            {!blockTopicsLoaded ? (
+              <span className="flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
+                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
+              </span>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {blockTopicOptions.map((opt) => {
+                    const key = blockTopicKey(opt.subjectId, opt.name);
+                    const subjLabel = SUBJECT_META[opt.subjectId as keyof typeof SUBJECT_META]?.label || opt.subjectId;
+                    const active = selectedBlockTopics.has(key);
+                    return (
+                      <Pill key={key} t={t} tone="teal" active={active} onClick={() => toggleBlockTopic(key)}>
+                        {opt.name} <span style={{ opacity: 0.65, fontWeight: 600 }}>({subjLabel})</span>
+                      </Pill>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px]" style={{ color: t.textFaint }}>
+                  Tap to select one or more. Leave empty to include every subheading.
+                </p>
+              </>
             )}
           </div>
         )}
