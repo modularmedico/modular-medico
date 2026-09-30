@@ -1067,6 +1067,68 @@ export function subscribeScopedQuestions(
   );
 }
 
+/**
+ * Live view of PUBLISHED questions scoped to a Block + Module (optionally narrowed
+ * to one Subject), used by the Test Sessions "Add MCQs" builder.
+ *
+ * This deliberately mirrors subscribeScopedQuestions() above rather than going
+ * through fetchPublishedBlock()/fetchPublishedModuleExam(): those two are wrapped
+ * in cacheFirstFetch() with a 1-hour TTL, which is the right tradeoff for a student's
+ * practice session (instant repeat loads) but the wrong one here — an admin publishing
+ * MCQs and immediately trying to add them to a test would keep seeing a stale "0
+ * available" result for up to an hour, since a fresh-within-TTL cache entry is
+ * returned as-is with no background refresh. A live onSnapshot listener has no such
+ * staleness window: it reflects Firestore the moment a question's status flips to
+ * "published", exactly like the Manage MCQs screen does.
+ */
+export function subscribePublishedModuleQuestions(
+  block: number,
+  moduleId: string,
+  subjectId: string | null,
+  cb: (questions: FirestoreQuestion[]) => void,
+  onError?: (reason: "permission-denied" | "offline" | "unknown", message: string) => void
+) {
+  const deleted = getDeletedQuestionIds();
+  const clauses: QueryConstraint[] = [
+    where("moduleId", "==", moduleId),
+    where("block", "==", block),
+    where("status", "==", "published"),
+  ];
+  if (subjectId) clauses.push(where("subjectId", "==", subjectId));
+  const q = query(collection(db, "questions"), ...clauses);
+
+  const inScope = (fq: FirestoreQuestion) =>
+    fq.moduleId === moduleId && fq.block === block && fq.status === "published" && (!subjectId || fq.subjectId === subjectId);
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const fsQuestions = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
+      const localQs = getLocalQuestions().filter((lq) => lq.status === "published" && inScope(lq));
+      const defQuestions = DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && inScope(dq));
+      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
+    },
+    (err) => {
+      console.warn("Firestore published-questions fallback:", err.message);
+      const localQs = getLocalQuestions().filter((lq) => lq.status === "published" && inScope(lq));
+      const defQuestions = DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && inScope(dq));
+      cb(mergeQuestionSources(defQuestions, localQs, []));
+
+      const reason = classifyWriteError(err);
+      onError?.(
+        reason,
+        reason === "permission-denied"
+          ? "Your account isn't a real Firestore admin yet, so published MCQs can't be listed — you're only seeing MCQs cached in this browser. Run scripts/setAdminClaim.mjs to fix this."
+          : reason === "offline"
+          ? "You appear to be offline — only locally cached MCQs are shown."
+          : "Couldn't load published MCQs from Firestore — only locally cached MCQs are shown."
+      );
+    }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Practice-session fetchers.
 //

@@ -6,9 +6,8 @@ import Btn from "../Btn";
 import { FONT_DISPLAY, FONT_MONO, type ThemeTokens } from "../../theme";
 import { DEFAULT_BLOCK_DEFINITIONS, SUBJECT_META, TOTAL_BLOCKS, type BlockDefinition } from "../../data/subjects";
 import {
-  fetchPublishedBlock,
-  fetchPublishedModuleExam,
   subscribeBlockDefinitions,
+  subscribePublishedModuleQuestions,
 } from "../../services/adminContent";
 import {
   addQuestionsToTestSession,
@@ -261,24 +260,29 @@ function TestEditor({
     setTopic("");
   }, [moduleId, subjectId]);
 
-  // Load the published MCQs for the chosen scope (cached by the existing fetchers).
+  // Load the published MCQs for the chosen scope via a live listener (same approach
+  // as the Manage MCQs screen's subscribeScopedQuestions) rather than the cached
+  // fetchPublishedBlock/fetchPublishedModuleExam fetchers. Those cache each scope's
+  // result for an hour, so an admin who publishes MCQs and immediately opens "Add
+  // MCQs" could keep seeing a stale "0 available" here for up to an hour. A live
+  // onSnapshot has no such staleness window.
   useEffect(() => {
     if (!block || !moduleId) {
       setPool([]);
       return;
     }
-    let cancelled = false;
     setPoolLoading(true);
-    const load = subjectId
-      ? fetchPublishedBlock(subjectId, moduleId, block)
-      : fetchPublishedModuleExam(block, moduleId);
-    load
-      .then((list) => !cancelled && setPool(list))
-      .catch(() => !cancelled && setPool([]))
-      .finally(() => !cancelled && setPoolLoading(false));
-    return () => {
-      cancelled = true;
-    };
+    const unsub = subscribePublishedModuleQuestions(
+      block,
+      moduleId,
+      subjectId || null,
+      (list) => {
+        setPool(list);
+        setPoolLoading(false);
+      },
+      () => setPoolLoading(false)
+    );
+    return () => unsub();
   }, [block, moduleId, subjectId]);
 
   const alreadyIn = useMemo(() => new Set(test.questions.map((q) => q.sourceId)), [test.questions]);
