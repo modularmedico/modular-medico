@@ -43,6 +43,7 @@ import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import Spinner from "../components/Spinner";
+import Toggle from "../components/Toggle";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import {
@@ -71,6 +72,8 @@ import {
   setUserPremium,
   subscribeFreeBlocks,
   saveFreeBlocks,
+  subscribeTestSeriesAccess,
+  saveTestSeriesAccess,
   QuestionSaveError,
 } from "../services/adminContent";
 import {
@@ -162,6 +165,45 @@ export default function AdminPanel() {
     });
     return unsub;
   }, [activeTab]);
+
+  // Single global on/off switch for Test Series — editable here, right
+  // alongside the Block unlock controls. Backed by services/adminContent.ts's
+  // subscribeTestSeriesAccess()/saveTestSeriesAccess() (Firestore doc
+  // settings/testSeriesAccess).
+  const [testSeriesEnabled, setTestSeriesEnabledLocal] = useState(true);
+  const [testSeriesLoading, setTestSeriesLoading] = useState(true);
+  const [testSeriesSaving, setTestSeriesSaving] = useState(false);
+  const storeSetTestSeriesEnabled = useAppStore((s) => s.setTestSeriesEnabled);
+
+  useEffect(() => {
+    if (activeTab !== "manage_access") return;
+    setTestSeriesLoading(true);
+    const unsub = subscribeTestSeriesAccess((enabled) => {
+      setTestSeriesEnabledLocal(enabled);
+      setTestSeriesLoading(false);
+    });
+    return unsub;
+  }, [activeTab]);
+
+  // Flip the global Test Series switch. Optimistically updates the toggle,
+  // then persists to Firestore, then updates the shared store so every open
+  // tab reflects the change immediately.
+  const handleToggleTestSeriesAccess = async () => {
+    const next = !testSeriesEnabled;
+    setTestSeriesEnabledLocal(next);
+    setTestSeriesSaving(true);
+    try {
+      await saveTestSeriesAccess(next);
+      storeSetTestSeriesEnabled(next);
+      setAccessNotice(`Test Series is now ${next ? "accessible to all students" : "blocked for students"}.`);
+    } catch (err) {
+      console.warn("Failed to save test series access:", err);
+      setAccessNotice("Couldn't save that change — check your connection and try again.");
+      setTestSeriesEnabledLocal(testSeriesEnabled); // revert optimistic update
+    } finally {
+      setTestSeriesSaving(false);
+    }
+  };
 
   // Toggle one Block's free/paywalled status. Optimistically flips the
   // checkbox, then persists the whole next array to Firestore, then updates
@@ -3447,6 +3489,44 @@ export default function AdminPanel() {
                     </button>
                   );
                 })}
+              </div>
+            )}
+          </Card>
+
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-start gap-3">
+              <ClipboardList size={18} color={t.purple} className="mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>Test Series Access</h2>
+                <p className="mt-1 text-xs" style={{ color: t.textMuted }}>
+                  One switch for every student: on and they can open and take any Test Series;
+                  off and the Tests page is locked for everyone (admins can still preview it).
+                </p>
+              </div>
+            </div>
+
+            {testSeriesLoading ? (
+              <div className="mt-4 py-4 text-center">
+                <Spinner t={t} size={20} label="Loading test series setting\u2026" />
+              </div>
+            ) : (
+              <div
+                className="mt-4 flex items-center justify-between gap-3 rounded-xl p-3"
+                style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
+              >
+                <div className="flex items-center gap-2">
+                  {testSeriesSaving ? (
+                    <Loader2 size={14} className="animate-spin" color={t.textFaint} />
+                  ) : testSeriesEnabled ? (
+                    <Unlock size={14} color={t.green} />
+                  ) : (
+                    <Lock size={14} color={t.textMuted} />
+                  )}
+                  <span className="text-xs font-bold" style={{ color: testSeriesEnabled ? t.green : t.textMuted }}>
+                    {testSeriesEnabled ? "Students can access all test series" : "Students can't access test series"}
+                  </span>
+                </div>
+                <Toggle t={t} checked={testSeriesEnabled} onChange={handleToggleTestSeriesAccess} />
               </div>
             )}
           </Card>

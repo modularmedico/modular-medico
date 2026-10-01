@@ -52,6 +52,13 @@ interface AppState {
   freeSubjects: Record<number, string[]>;
   setFreeSubjects: (map: Record<number, string[]>) => void;
 
+  // Whether Test Series are open to students at all — defaults to true (on)
+  // and is kept live by subscribeTestSeriesAccess() in App.tsx once
+  // Firestore's settings/testSeriesAccess doc loads, so an admin's toggle on
+  // the "Manage Access" tab takes effect for everyone instantly.
+  testSeriesEnabled: boolean;
+  setTestSeriesEnabled: (enabled: boolean) => void;
+
   session: QuizSession | null;
   startSession: (setRef: ActiveSetRef, config: PracticeConfig) => void;
   updateSession: (patch: Partial<QuizSession>) => void;
@@ -107,6 +114,9 @@ export const useAppStore = create<AppState>()(
       freeSubjects: {},
       setFreeSubjects: (map) => set({ freeSubjects: map }),
 
+      testSeriesEnabled: true,
+      setTestSeriesEnabled: (enabled) => set({ testSeriesEnabled: enabled }),
+
       session: null,
       startSession: (setRef, config) =>
         set({
@@ -142,6 +152,7 @@ export const useAppStore = create<AppState>()(
         profile: s.profile,
         freeBlocks: s.freeBlocks,
         freeSubjects: s.freeSubjects,
+        testSeriesEnabled: s.testSeriesEnabled,
         session: s.session,
         lastResult: s.lastResult,
       }),
@@ -191,3 +202,11 @@ export const useIsSubjectUnlocked = (block: number, subjectId: string | null | u
     if (s.profile?.unlockedBlocks?.includes(block)) return true;
     return !!subjectId && !!s.freeSubjects[block]?.includes(subjectId);
   });
+
+/**
+ * Whether the signed-in user can access Test Series at all. Admins always
+ * can (so they can preview); everyone else follows the single global
+ * on/off switch an admin sets on the "Manage Access" tab.
+ */
+export const useCanAccessTestSeries = () =>
+  useAppStore((s) => s.isAdmin || s.testSeriesEnabled);

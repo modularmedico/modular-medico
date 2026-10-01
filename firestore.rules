@@ -103,9 +103,10 @@ service cloud.firestore {
 
     // ---------------------------------------------------------------
     // App-wide settings, e.g. settings/freeBlocks ({ blocks: number[] }),
-    // which Blocks are free for everyone. Readable by anyone (guests need
-    // it to know which Blocks to unlock), writable only by admins — edited
-    // from the "Manage Access" tab's Free Blocks toggle grid.
+    // which Blocks are free for everyone, or settings/testSeriesAccess
+    // ({ enabled: boolean }), whether students can access Test Series.
+    // Readable by anyone (guests need it to know what's unlocked), writable
+    // only by admins — edited from the "Manage Access" tab.
     // ---------------------------------------------------------------
     match /settings/{settingId} {
       allow read: if true;

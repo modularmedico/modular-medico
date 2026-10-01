@@ -81,6 +81,65 @@ export async function saveFreeBlocks(blocks: number[]): Promise<void> {
   await setDoc(doc(db, "settings", "freeBlocks"), { blocks: cleaned });
 }
 
+/* ---------------------------- Test Series gate --------------------------- */
+
+/**
+ * Whether Test Sessions ("Test Series") are open to students at all, stored
+ * in a single Firestore doc (`settings/testSeriesAccess`) so an admin can
+ * flip it at runtime from the "Manage Access" tab, right alongside the Block
+ * unlock controls. Defaults to ON (true) so existing behavior is unchanged
+ * until an admin turns it off. Falls back to the localStorage cache, then to
+ * the default, if Firestore is unreachable or the doc doesn't exist yet.
+ */
+const LOCAL_TEST_SERIES_ACCESS_KEY = "modular_medico_test_series_access";
+
+function getLocalTestSeriesAccess(): boolean | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_TEST_SERIES_ACCESS_KEY);
+    if (raw !== null) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function setLocalTestSeriesAccess(enabled: boolean) {
+  try {
+    localStorage.setItem(LOCAL_TEST_SERIES_ACCESS_KEY, JSON.stringify(enabled));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live view of whether students can currently access Test Series. */
+export function subscribeTestSeriesAccess(cb: (enabled: boolean) => void) {
+  const fallback = getLocalTestSeriesAccess() ?? true;
+  const ref = doc(db, "settings", "testSeriesAccess");
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as { enabled?: boolean };
+        const enabled = typeof data.enabled === "boolean" ? data.enabled : fallback;
+        setLocalTestSeriesAccess(enabled);
+        cb(enabled);
+      } else {
+        cb(fallback);
+      }
+    },
+    (err) => {
+      console.warn("Firestore testSeriesAccess fallback:", err.message);
+      cb(fallback);
+    }
+  );
+}
+
+/** Admin action: turn Test Series access on/off for every student at once. */
+export async function saveTestSeriesAccess(enabled: boolean): Promise<void> {
+  setLocalTestSeriesAccess(enabled);
+  await setDoc(doc(db, "settings", "testSeriesAccess"), { enabled });
+}
+
 /* ------------------- Free subjects inside paid blocks ------------------- */
 
 /**

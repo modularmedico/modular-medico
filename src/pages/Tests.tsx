@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ClipboardList, Clock, HelpCircle, Play, Loader2 } from "lucide-react";
+import { ClipboardList, Clock, HelpCircle, Play, Loader2, Lock } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
-import { useAppStore } from "../store/useAppStore";
+import { useAppStore, useCanAccessTestSeries } from "../store/useAppStore";
 import { subscribePublishedTestSessions } from "../services/testSessions";
 import type { PracticeConfig, TestSessionDoc } from "../types";
 
@@ -13,22 +13,27 @@ export default function Tests() {
   const navigate = useNavigate();
   const isDark = useAppStore((s) => s.isDark);
   const startSession = useAppStore((s) => s.startSession);
+  const canAccess = useCanAccessTestSeries();
   const t = isDark ? THEME.dark : THEME.light;
 
   const [tests, setTests] = useState<TestSessionDoc[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(
-    () =>
-      subscribePublishedTestSessions(
-        (list) => {
-          setTests(list.filter((x) => x.questions.length > 0));
-          setLoading(false);
-        },
-        () => setLoading(false)
-      ),
-    []
-  );
+  useEffect(() => {
+    // Access is switched off for students — don't even bother loading the
+    // list of tests, just show the locked state below.
+    if (!canAccess) {
+      setLoading(false);
+      return;
+    }
+    return subscribePublishedTestSessions(
+      (list) => {
+        setTests(list.filter((x) => x.questions.length > 0));
+        setLoading(false);
+      },
+      () => setLoading(false)
+    );
+  }, [canAccess]);
 
   const start = (test: TestSessionDoc) => {
     // Runs in the existing Mock Exam mode: OMR-style answering, strict countdown
@@ -67,7 +72,15 @@ export default function Tests() {
         </p>
       </div>
 
-      {loading ? (
+      {!canAccess ? (
+        <Card t={t} style={{ textAlign: "center", padding: 32 }}>
+          <Lock size={28} color={t.textFaint} style={{ margin: "0 auto 10px" }} />
+          <p style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 16 }}>Test Series is locked</p>
+          <p style={{ color: t.textMuted, fontSize: 13, marginTop: 4 }}>
+            Test Series access is currently switched off. Check back later or reach out to the team.
+          </p>
+        </Card>
+      ) : loading ? (
         <div className="flex items-center justify-center gap-2 py-16 text-sm" style={{ color: t.textMuted }}>
           <Loader2 size={16} className="animate-spin" /> Loading tests&hellip;
         </div>

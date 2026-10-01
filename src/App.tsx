@@ -25,7 +25,7 @@ import Paywall from "./pages/Paywall";
 import NotFound from "./pages/NotFound";
 import { subscribeAuth } from "./services/auth";
 import { subscribeUserProfile } from "./services/firestore";
-import { subscribeFreeBlocks, subscribeFreeSubjects } from "./services/adminContent";
+import { subscribeFreeBlocks, subscribeFreeSubjects, subscribeTestSeriesAccess } from "./services/adminContent";
 import { useAppStore } from "./store/useAppStore";
 import { initAnalytics } from "./firebase";
 import { trackVisit } from "./services/siteStats";
@@ -44,6 +44,7 @@ export default function App() {
   const setAuthReady = useAppStore((s) => s.setAuthReady);
   const setFreeBlocks = useAppStore((s) => s.setFreeBlocks);
   const setFreeSubjects = useAppStore((s) => s.setFreeSubjects);
+  const setTestSeriesEnabled = useAppStore((s) => s.setTestSeriesEnabled);
   const uid = useAppStore((s) => s.uid);
 
   useEffect(() => {
@@ -63,6 +64,9 @@ export default function App() {
 
   // Same for per-subject free access inside paid blocks.
   useEffect(() => subscribeFreeSubjects(setFreeSubjects), [setFreeSubjects]);
+
+  // Same for the global Test Series on/off switch.
+  useEffect(() => subscribeTestSeriesAccess(setTestSeriesEnabled), [setTestSeriesEnabled]);
 
   // Keep the store in sync with Firebase Auth for the lifetime of the app.
   useEffect(() => {
