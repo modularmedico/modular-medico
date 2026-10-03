@@ -189,6 +189,16 @@ export interface UserProfile {
    * can never lock a block that premium/FREE_BLOCK already unlocks.
    */
   unlockedBlocks?: number[] | null;
+  /**
+   * Per-account Test Series access override, set only by an admin from the
+   * "Manage Access" admin tab (the "Test" toggle next to a student's Manually
+   * Unlocked Blocks). When true, this account can open every published Test
+   * Session regardless of the global Test Series on/off switch and regardless
+   * of which Blocks/Subjects it draws questions from. `false`/absent means no
+   * override: the account still follows the normal testSeriesEnabled +
+   * per-test Block/Subject rules.
+   */
+  testSeriesUnlocked?: boolean;
 }
 
 export interface AttemptRecord {

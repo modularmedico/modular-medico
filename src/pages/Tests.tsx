@@ -39,6 +39,9 @@ export default function Tests() {
   const isPremium = useIsPremium();
   const freeBlocks = useAppStore((s) => s.freeBlocks);
   const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
+  // Admin-granted "Test" override (Manage Access tab) — bypasses the per-test
+  // Block/Subject paywall below entirely, same as it bypasses the global switch.
+  const testSeriesUnlocked = useAppStore((s) => s.profile?.testSeriesUnlocked);
   const t = isDark ? THEME.dark : THEME.light;
 
   const [tests, setTests] = useState<TestSessionDoc[]>([]);
@@ -71,8 +74,11 @@ export default function Tests() {
     if (isBlockUnlocked(src.block)) return true;
     return !!src.subjectId && isSubjectFree(freeSubjects, src.block, src.subjectId);
   };
-  // A test is locked if ANY of the content it draws from isn't unlocked for this user.
-  const isTestLocked = (test: TestSessionDoc) => test.sources.some((src) => !isSourceUnlocked(src));
+  // A test is locked if ANY of the content it draws from isn't unlocked for this user —
+  // unless an admin granted this account the standalone "Test" override, which unlocks
+  // every test outright regardless of Block/Subject.
+  const isTestLocked = (test: TestSessionDoc) =>
+    !testSeriesUnlocked && test.sources.some((src) => !isSourceUnlocked(src));
 
   const start = (test: TestSessionDoc) => {
     // Runs in the existing Mock Exam mode: OMR-style answering, strict countdown

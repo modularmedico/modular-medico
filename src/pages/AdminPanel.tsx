@@ -69,6 +69,7 @@ import {
   deleteSubheading,
   subscribeAllUsers,
   setUserUnlockedBlocks,
+  setUserTestSeriesUnlocked,
   setUserPremium,
   subscribeFreeBlocks,
   saveFreeBlocks,
@@ -276,6 +277,26 @@ export default function AdminPanel() {
     } catch {
       setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, premium: u.premium, premiumExpiry: u.premiumExpiry } : x)));
       setAccessNotice(`Failed to update premium status for ${u.email || u.uid}.`);
+      setTimeout(() => setAccessNotice(null), 3500);
+    } finally {
+      setAccessSaving((s) => ({ ...s, [u.uid]: false }));
+    }
+  };
+
+  // Grants/revokes the standalone "Test" override — lets this one account open
+  // every published Test Session regardless of the global Test Series switch
+  // or which Blocks/Subjects a given test draws from.
+  const handleToggleUserTestSeries = async (u: UserProfile) => {
+    const next = !u.testSeriesUnlocked;
+    setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, testSeriesUnlocked: next } : x)));
+    setAccessSaving((s) => ({ ...s, [u.uid]: true }));
+    try {
+      await setUserTestSeriesUnlocked(u.uid, next);
+      setAccessNotice(next ? `${u.email || u.uid} can now access Test Series.` : `${u.email || u.uid} no longer has Test Series access granted.`);
+      setTimeout(() => setAccessNotice(null), 2500);
+    } catch {
+      setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, testSeriesUnlocked: u.testSeriesUnlocked } : x)));
+      setAccessNotice(`Failed to update Test Series access for ${u.email || u.uid}.`);
       setTimeout(() => setAccessNotice(null), 3500);
     } finally {
       setAccessSaving((s) => ({ ...s, [u.uid]: false }));
@@ -3649,6 +3670,22 @@ export default function AdminPanel() {
                               </button>
                             );
                           })}
+
+                        {/* Standalone Test Series override — separate from the Block grid above,
+                            grants/revokes this one account access to every published test. */}
+                        <button
+                          onClick={() => handleToggleUserTestSeries(u)}
+                          disabled={isSaving}
+                          className="flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-extrabold transition-all disabled:opacity-40"
+                          style={{
+                            backgroundColor: u.testSeriesUnlocked ? t.teal : t.surfaceAlt,
+                            color: u.testSeriesUnlocked ? "#fff" : t.textMuted,
+                            border: `1.5px solid ${u.testSeriesUnlocked ? t.teal : t.border}`,
+                          }}
+                          title={`Test Series${u.testSeriesUnlocked ? " (unlocked for this account)" : ""}`}
+                        >
+                          <ClipboardList size={12} /> Test
+                        </button>
                       </div>
                     </div>
                   </div>

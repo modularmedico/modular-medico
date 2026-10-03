@@ -70,6 +70,10 @@ export default function Practice() {
   const [showAddTime, setShowAddTime] = useState(false);
   const [customMinutes, setCustomMinutes] = useState("");
   const [showSkippedList, setShowSkippedList] = useState(false);
+  // Mobile fallback: lets a phone/small-tablet user opt out of the desktop-only
+  // split-screen OMR/exam layout and continue the SAME session in the normal
+  // one-question-at-a-time style instead of being hard-blocked.
+  const [mobileNormalMode, setMobileNormalMode] = useState(false);
 
   const addTimeSeconds = (sec: number) => {
     setSecondsLeft((curr) => (curr === null ? sec : curr + sec));
@@ -119,7 +123,7 @@ export default function Practice() {
   }
 
   const { setRef, config, queue, pos, record, bookmarked, requeueCount, skipped } = session;
-  const isOmr = config.mode === "omr" || config.mode === "exam";
+  const isOmr = (config.mode === "omr" || config.mode === "exam") && !mobileNormalMode;
   const exitTo = setRef.moduleId.startsWith("test-") ? "/tests" : "/subjects";
   const qIndex = queue[pos];
   const question = setRef.questions[qIndex];
@@ -371,11 +375,16 @@ export default function Practice() {
           <Monitor size={48} color={t.purple} className="mb-4" />
           <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 20 }}>Desktop Required</h2>
           <p style={{ color: t.textMuted, marginTop: 8 }}>
-            This mode features a split-screen layout that requires a wider screen. Please switch to a desktop or tablet device in landscape.
+            This mode features a split-screen layout that requires a wider screen. Switch to a desktop or tablet in landscape, or keep going below in the normal one-question-at-a-time style.
           </p>
-          <Btn t={t} onClick={() => { clearSession(); navigate(exitTo); }} style={{ marginTop: 24 }}>
-            Exit Practice
-          </Btn>
+          <div className="flex flex-col gap-2.5 mt-6 w-full max-w-xs">
+            <Btn t={t} full onClick={() => setMobileNormalMode(true)}>
+              Continue in Standard Mode
+            </Btn>
+            <Btn t={t} full variant="ghost" onClick={() => { clearSession(); navigate(exitTo); }}>
+              Exit Practice
+            </Btn>
+          </div>
         </div>
 
         {/* Desktop Split View */}
@@ -565,6 +574,7 @@ export default function Practice() {
         <Pill t={t} tone="muted">{SUBJECT_META[setRef.subjectId as keyof typeof SUBJECT_META]?.label || "Quiz"}</Pill>
         <Pill t={t} tone="purple">{setRef.moduleName} \u00b7 Block {setRef.block}</Pill>
         {requeueCount[qIndex] > 0 && <Pill t={t} tone="gold">Review</Pill>}
+        {mobileNormalMode && <Pill t={t} tone="teal">Standard Mode</Pill>}
         {skippedPositions.length > 0 && (
           <div className="relative ml-auto">
             <button

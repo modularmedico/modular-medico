@@ -1788,6 +1788,17 @@ export async function setUserUnlockedBlocks(uid: string, blocks: number[]) {
   await updateDoc(doc(db, "users", uid), { unlockedBlocks: sorted });
 }
 
+/**
+ * Grants or revokes the per-account Test Series override — the "Test" toggle
+ * shown next to a student's Manually Unlocked Blocks. When granted, this
+ * account can open every published Test Session regardless of the global
+ * Test Series on/off switch and regardless of which Blocks/Subjects the test
+ * draws from.
+ */
+export async function setUserTestSeriesUnlocked(uid: string, unlocked: boolean) {
+  await updateDoc(doc(db, "users", uid), { testSeriesUnlocked: unlocked });
+}
+
 /** Grants or revokes premium (the full 1–15 bundle) for one account from the admin panel. */
 export async function setUserPremium(uid: string, premium: boolean) {
   await updateDoc(doc(db, "users", uid), {

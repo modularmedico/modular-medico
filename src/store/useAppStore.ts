@@ -205,8 +205,10 @@ export const useIsSubjectUnlocked = (block: number, subjectId: string | null | u
 
 /**
  * Whether the signed-in user can access Test Series at all. Admins always
- * can (so they can preview); everyone else follows the single global
- * on/off switch an admin sets on the "Manage Access" tab.
+ * can (so they can preview); an account with the per-user `testSeriesUnlocked`
+ * override (set on the "Manage Access" tab) always can too, even while the
+ * global switch is off; everyone else follows that single global on/off
+ * switch an admin sets on the "Manage Access" tab.
  */
 export const useCanAccessTestSeries = () =>
-  useAppStore((s) => s.isAdmin || s.testSeriesEnabled);
+  useAppStore((s) => s.isAdmin || !!s.profile?.testSeriesUnlocked || s.testSeriesEnabled);
