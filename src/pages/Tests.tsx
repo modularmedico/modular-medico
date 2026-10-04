@@ -13,7 +13,7 @@ import {
   useIsPremium,
 } from "../store/useAppStore";
 import { subscribePublishedTestSessions } from "../services/testSessions";
-import { subscribeFreeSubjects, subscribeFreeTests, isSubjectFree, type FreeSubjectsMap } from "../services/adminContent";
+import { subscribeFreeTests } from "../services/adminContent";
 import { SUBJECT_META, type SubjectId } from "../data/subjects";
 import type { PracticeConfig, TestSessionDoc, TestSessionSource } from "../types";
 
@@ -38,18 +38,14 @@ export default function Tests() {
   const isLoggedIn = useIsLoggedIn();
   const isAdmin = useAppStore((s) => s.isAdmin);
   const isPremium = useIsPremium();
-  const freeBlocks = useAppStore((s) => s.freeBlocks);
-  const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
   // Admin-granted "Test" override (Manage Access tab) — bypasses the per-test
-  // Block/Subject paywall below entirely, same as it bypasses the global switch.
+  // paywall entirely, same as it bypasses the global switch.
   const testSeriesUnlocked = useAppStore((s) => s.profile?.testSeriesUnlocked);
   const t = isDark ? THEME.dark : THEME.light;
 
   const [tests, setTests] = useState<TestSessionDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [freeSubjects, setFreeSubjects] = useState<FreeSubjectsMap>({});
 
-  useEffect(() => subscribeFreeSubjects(setFreeSubjects), []);
   const [paidPrompt, setPaidPrompt] = useState<TestSessionDoc | null>(null);
   const [freeTestIds, setFreeTestIds] = useState<string[]>([]);
   useEffect(() => subscribeFreeTests(setFreeTestIds), []);
@@ -70,21 +66,14 @@ export default function Tests() {
     );
   }, [canAccess]);
 
-  // Same unlock rules the MCQ practice library uses (Block/Subject paywall): free
-  // blocks, admin, active premium, or an admin-granted block/subject override.
-  const isBlockUnlocked = (block: number) =>
-    freeBlocks.includes(block) || isAdmin || isPremium || !!unlockedBlocks?.includes(block);
-  const isSourceUnlocked = (src: TestSessionSource) => {
-    if (isBlockUnlocked(src.block)) return true;
-    return !!src.subjectId && isSubjectFree(freeSubjects, src.block, src.subjectId);
-  };
-  // A test is locked if ANY of the content it draws from isn't unlocked for this user —
-  // unless an admin granted this account the standalone "Test" override, which unlocks
-  // every test outright regardless of Block/Subject.
+  // Tests are independent of Blocks/Subjects: a test is FREE only if an admin marked it
+  // free (Manage Access > Free Tests). Everything else is PAID. Block/subject paywall
+  // settings and per-block unlocks don't affect tests at all.
+  const isPaidTest = (test: TestSessionDoc) => !freeTestIds.includes(test.id);
+  // Paid tests still open for admins, active Premium, or an account with the admin-granted
+  // standalone "Test" override.
   const isTestLocked = (test: TestSessionDoc) =>
-    !testSeriesUnlocked &&
-    !freeTestIds.includes(test.id) &&
-    test.sources.some((src) => !isSourceUnlocked(src));
+    isPaidTest(test) && !(isAdmin || isPremium || testSeriesUnlocked);
 
   const start = (test: TestSessionDoc) => {
     // Runs in the existing Mock Exam mode: OMR-style answering, strict countdown
@@ -157,6 +146,7 @@ export default function Tests() {
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
           {tests.map((test) => {
             const locked = isTestLocked(test);
+            const paid = isPaidTest(test);
             const srcs = uniqueSources(test.sources);
 
             return (
@@ -166,13 +156,14 @@ export default function Tests() {
                     <Pill t={t} tone="teal">
                       <ClipboardList size={12} /> Test session
                     </Pill>
-                    {locked ? (
+                    {paid ? (
                       <span
                         className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold"
                         style={{ backgroundColor: t.gold, color: "#241A08" }}
-                        title="Paid test"
+                        title={locked ? "Paid test" : "Paid test (you have access)"}
                       >
-                        <Lock size={11} strokeWidth={2.75} /> Paid
+                        {locked ? <Lock size={11} strokeWidth={2.75} /> : <Unlock size={11} strokeWidth={2.75} />}
+                        {locked ? "Paid" : "Paid \u00b7 Unlocked"}
                       </span>
                     ) : (
                       <span
@@ -180,7 +171,7 @@ export default function Tests() {
                         style={{ backgroundColor: `${t.green}22`, color: t.green }}
                         title="Free test"
                       >
-                        <Unlock size={11} strokeWidth={2.75} /> {freeTestIds.includes(test.id) ? "Free" : "Unlocked"}
+                        <Unlock size={11} strokeWidth={2.75} /> Free
                       </span>
                     )}
                   </div>
