@@ -12,7 +12,7 @@ import {
   useIsPremium,
 } from "../store/useAppStore";
 import { subscribePublishedTestSessions } from "../services/testSessions";
-import { subscribeFreeSubjects, isSubjectFree, type FreeSubjectsMap } from "../services/adminContent";
+import { subscribeFreeSubjects, subscribeFreeTests, isSubjectFree, type FreeSubjectsMap } from "../services/adminContent";
 import { SUBJECT_META, type SubjectId } from "../data/subjects";
 import type { PracticeConfig, TestSessionDoc, TestSessionSource } from "../types";
 
@@ -49,6 +49,8 @@ export default function Tests() {
   const [freeSubjects, setFreeSubjects] = useState<FreeSubjectsMap>({});
 
   useEffect(() => subscribeFreeSubjects(setFreeSubjects), []);
+  const [freeTestIds, setFreeTestIds] = useState<string[]>([]);
+  useEffect(() => subscribeFreeTests(setFreeTestIds), []);
 
   useEffect(() => {
     // Access is switched off for students — don't even bother loading the
@@ -78,7 +80,9 @@ export default function Tests() {
   // unless an admin granted this account the standalone "Test" override, which unlocks
   // every test outright regardless of Block/Subject.
   const isTestLocked = (test: TestSessionDoc) =>
-    !testSeriesUnlocked && test.sources.some((src) => !isSourceUnlocked(src));
+    !testSeriesUnlocked &&
+    !freeTestIds.includes(test.id) &&
+    test.sources.some((src) => !isSourceUnlocked(src));
 
   const start = (test: TestSessionDoc) => {
     // Runs in the existing Mock Exam mode: OMR-style answering, strict countdown

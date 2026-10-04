@@ -140,6 +140,64 @@ export async function saveTestSeriesAccess(enabled: boolean): Promise<void> {
   await setDoc(doc(db, "settings", "testSeriesAccess"), { enabled });
 }
 
+/* ------------------------- Free individual tests ------------------------- */
+
+/**
+ * Test Session ids that are FREE for everyone, even if the blocks/subjects they
+ * draw from are paywalled. Stored in `settings/freeTests` as `{ ids: string[] }`.
+ */
+const LOCAL_FREE_TESTS_KEY = "modular_medico_free_tests";
+
+function getLocalFreeTests(): string[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_FREE_TESTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function setLocalFreeTests(ids: string[]) {
+  try {
+    localStorage.setItem(LOCAL_FREE_TESTS_KEY, JSON.stringify(ids));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live view of which Test Sessions are free for everyone. */
+export function subscribeFreeTests(cb: (ids: string[]) => void) {
+  const fallback = getLocalFreeTests();
+  return onSnapshot(
+    doc(db, "settings", "freeTests"),
+    (snap) => {
+      if (snap.exists()) {
+        const raw = (snap.data() as { ids?: unknown }).ids;
+        const ids = Array.isArray(raw) ? Array.from(new Set(raw.map(String))) : [];
+        setLocalFreeTests(ids);
+        cb(ids);
+      } else {
+        cb(fallback);
+      }
+    },
+    (err) => {
+      console.warn("Firestore freeTests fallback:", err.message);
+      cb(fallback);
+    }
+  );
+}
+
+/** Admin action: replace the list of free Test Sessions. */
+export async function saveFreeTests(ids: string[]): Promise<void> {
+  const cleaned = Array.from(new Set(ids));
+  setLocalFreeTests(cleaned);
+  await setDoc(doc(db, "settings", "freeTests"), { ids: cleaned });
+}
+
 /* ------------------- Free subjects inside paid blocks ------------------- */
 
 /**
