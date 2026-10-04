@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ClipboardList, Clock, HelpCircle, Play, Loader2, Lock, Layers, BookOpen } from "lucide-react";
+import { ClipboardList, Clock, HelpCircle, Play, Loader2, Lock, Unlock, Layers, BookOpen } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
+import PaidTestModal from "../components/PaidTestModal";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import {
   useAppStore,
@@ -49,6 +50,7 @@ export default function Tests() {
   const [freeSubjects, setFreeSubjects] = useState<FreeSubjectsMap>({});
 
   useEffect(() => subscribeFreeSubjects(setFreeSubjects), []);
+  const [paidPrompt, setPaidPrompt] = useState<TestSessionDoc | null>(null);
   const [freeTestIds, setFreeTestIds] = useState<string[]>([]);
   useEffect(() => subscribeFreeTests(setFreeTestIds), []);
 
@@ -114,7 +116,7 @@ export default function Tests() {
 
   const handleStart = (test: TestSessionDoc) => {
     if (isTestLocked(test)) {
-      navigate(isLoggedIn ? "/paywall" : "/signup");
+      setPaidPrompt(test);
       return;
     }
     start(test);
@@ -164,13 +166,21 @@ export default function Tests() {
                     <Pill t={t} tone="teal">
                       <ClipboardList size={12} /> Test session
                     </Pill>
-                    {locked && (
+                    {locked ? (
                       <span
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold"
                         style={{ backgroundColor: t.gold, color: "#241A08" }}
-                        title="Requires unlock"
+                        title="Paid test"
                       >
-                        <Lock size={12} strokeWidth={2.75} />
+                        <Lock size={11} strokeWidth={2.75} /> Paid
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold"
+                        style={{ backgroundColor: `${t.green}22`, color: t.green }}
+                        title="Free test"
+                      >
+                        <Unlock size={11} strokeWidth={2.75} /> {freeTestIds.includes(test.id) ? "Free" : "Unlocked"}
                       </span>
                     )}
                   </div>
@@ -216,12 +226,20 @@ export default function Tests() {
                 </div>
 
                 <Btn t={t} full icon={locked ? Lock : Play} onClick={() => handleStart(test)}>
-                  {locked ? "Unlock to start" : "Start test"}
+                  {locked ? "Paid — unlock to start" : "Start test"}
                 </Btn>
               </Card>
             );
           })}
         </div>
+      )}
+      {paidPrompt && (
+        <PaidTestModal
+          testName={paidPrompt.name}
+          isLoggedIn={isLoggedIn}
+          onClose={() => setPaidPrompt(null)}
+          onViewPlans={() => navigate(isLoggedIn ? "/paywall" : "/signup")}
+        />
       )}
     </div>
   );
