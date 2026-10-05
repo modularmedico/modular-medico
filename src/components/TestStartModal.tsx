@@ -86,7 +86,7 @@ export default function TestStartModal({ testName, initial, busy, onClose, onSub
             maxLength={MAX_NAME_LEN}
             autoFocus
             autoComplete="name"
-            placeholder="e.g. Ayesha Khan"
+            placeholder="e.g. Muhammad Irfan"
             className="mt-1 w-full rounded-2xl px-3.5 py-3 text-sm font-semibold outline-none"
             style={inputStyle(touched && !nameOk)}
           />
@@ -98,7 +98,7 @@ export default function TestStartModal({ testName, initial, busy, onClose, onSub
             value={college}
             onChange={(e) => setCollege(e.target.value)}
             maxLength={MAX_COLLEGE_LEN}
-            placeholder="e.g. King Edward Medical University"
+            placeholder="e.g. Sargodha Medical College"
             className="mt-1 w-full rounded-2xl px-3.5 py-3 text-sm font-semibold outline-none"
             style={inputStyle(touched && !collegeOk)}
           />
