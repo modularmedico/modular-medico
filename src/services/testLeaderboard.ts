@@ -264,3 +264,74 @@ export function rankGlobal(entries: TestLeaderboardEntry[]): GlobalRow[] {
     .map((r) => ({ ...r, avgPct: r.testsTaken ? Math.round(r.pctSum / r.testsTaken) : 0 }))
     .sort((a, b) => b.correct - a.correct || a.timeTakenSec - b.timeTakenSec);
 }
+
+
+/* ------------------------------ admin analytics ------------------------------ */
+
+export interface TestAttemptStats {
+  testId: string;
+  testName: string;
+  /** Students who started this test at least once. */
+  students: number;
+  /** Students who finished it at least once. */
+  completedStudents: number;
+  /** Total starts (a student retaking after the cooldown counts again). */
+  attempts: number;
+  /** Average of each finishing student's best score, in %. */
+  avgPct: number;
+}
+
+export interface TestAnalytics {
+  /** Unique students who started at least one test. */
+  uniqueStudents: number;
+  /** Unique students who finished at least one test. */
+  uniqueCompleted: number;
+  /** Total attempts started across all tests. */
+  totalAttempts: number;
+  /** Tests that have at least one attempt. */
+  testsAttempted: number;
+  perTest: TestAttemptStats[];
+}
+
+/** Every leaderboard entry (admin analytics only — reads the whole collection while subscribed). */
+export function subscribeAllTestEntries(cb: (entries: TestLeaderboardEntry[]) => void, onError?: (message: string) => void) {
+  return onSnapshot(
+    collection(db, COL),
+    (snap) => cb(snap.docs.map(fromSnap)),
+    (err) => {
+      console.warn("Firestore test analytics error:", err.message);
+      onError?.(err.message);
+      cb([]);
+    }
+  );
+}
+
+/** Roll the per-(test, student) entries up into the numbers the admin analytics tab shows. */
+export function summarizeTestAnalytics(entries: TestLeaderboardEntry[]): TestAnalytics {
+  const perTestMap = new Map<string, TestAttemptStats & { pctSum: number }>();
+  const started = new Set<string>();
+  const finished = new Set<string>();
+  let totalAttempts = 0;
+
+  for (const e of entries) {
+    started.add(e.uid);
+    if (e.completed) finished.add(e.uid);
+    totalAttempts += Math.max(1, e.attempts);
+
+    const row = perTestMap.get(e.testId) ?? { testId: e.testId, testName: e.testName, students: 0, completedStudents: 0, attempts: 0, avgPct: 0, pctSum: 0 };
+    row.testName = e.testName || row.testName;
+    row.students += 1;
+    row.attempts += Math.max(1, e.attempts);
+    if (e.completed) {
+      row.completedStudents += 1;
+      row.pctSum += e.scorePct;
+    }
+    perTestMap.set(e.testId, row);
+  }
+
+  const perTest = [...perTestMap.values()]
+    .map(({ pctSum, ...r }) => ({ ...r, avgPct: r.completedStudents > 0 ? Math.round(pctSum / r.completedStudents) : 0 }))
+    .sort((a, b) => b.students - a.students || b.attempts - a.attempts);
+
+  return { uniqueStudents: started.size, uniqueCompleted: finished.size, totalAttempts, testsAttempted: perTest.length, perTest };
+}

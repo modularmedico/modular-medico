@@ -126,6 +126,8 @@ export default function Practice() {
 
   const { setRef, config, queue, pos, record, bookmarked, requeueCount, skipped } = session;
   const isOmr = (config.mode === "omr" || config.mode === "exam") && !mobileNormalMode;
+  // Test Sessions with "show answers at the end": record the answer, never reveal it mid-test.
+  const hideFeedback = !!config.deferResults;
   const exitTo = setRef.moduleId.startsWith("test-") ? "/tests" : "/subjects";
   const qIndex = queue[pos];
   const question = setRef.questions[qIndex];
@@ -162,7 +164,7 @@ export default function Practice() {
     }
 
     updateSession({ record: newRecord, queue: newQueue, requeueCount: newRequeueCount, skipped: newSkipped });
-    if (isOmr) {
+    if (isOmr || hideFeedback) {
       advanceFrom(newQueue, newRecord);
     } else {
       setAnswered(true);
@@ -177,7 +179,7 @@ export default function Practice() {
     const existing = rec[targetQIdx];
     updateSession({ pos: newPos });
     setSelected(existing?.selected ?? null);
-    setAnswered(!isOmr && !!existing && existing.selected !== null);
+    setAnswered(!isOmr && !hideFeedback && !!existing && existing.selected !== null);
   };
 
   const advanceFrom = (q: number[], rec: Record<number, AnswerRecord>) => {
@@ -798,8 +800,8 @@ export default function Practice() {
             </button>
           )}
           {!answered ? (
-            <Btn t={t} onClick={submitAnswer} disabled={selected === null}>
-              Submit answer
+            <Btn t={t} onClick={submitAnswer} disabled={selected === null} icon={hideFeedback ? ArrowRight : undefined}>
+              {hideFeedback ? (pos + 1 >= totalSteps ? "Finish test" : "Save & next") : "Submit answer"}
             </Btn>
           ) : (
             <Btn t={t} onClick={advance} icon={ArrowRight}>

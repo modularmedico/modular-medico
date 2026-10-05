@@ -18,6 +18,8 @@ const fromSnap = (d: { id: string; data: () => unknown }): TestSessionDoc => {
     status: data.status === "published" ? "published" : "draft",
     questions: data.questions || [],
     sources: data.sources || [],
+    // Older tests have no field -> treat as "results at the end".
+    showAnswersAtEnd: data.showAnswersAtEnd !== false,
     createdAt: data.createdAt || 0,
   };
 };
@@ -64,6 +66,7 @@ export async function createTestSession(name: string): Promise<string> {
     status: "draft" as QuestionStatus,
     questions: [],
     sources: [],
+    showAnswersAtEnd: true,
     createdAt: Date.now(),
   });
   return ref.id;
@@ -75,6 +78,11 @@ export async function deleteTestSession(id: string): Promise<void> {
 
 export async function setTestSessionStatus(id: string, status: QuestionStatus): Promise<void> {
   await updateDoc(doc(db, COL, id), { status });
+}
+
+/** Choose whether students see answers instantly (false) or only on the results screen (true). */
+export async function setTestSessionShowAnswersAtEnd(id: string, showAnswersAtEnd: boolean): Promise<void> {
+  await updateDoc(doc(db, COL, id), { showAnswersAtEnd });
 }
 
 export async function renameTestSession(id: string, name: string): Promise<void> {

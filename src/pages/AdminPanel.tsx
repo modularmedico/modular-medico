@@ -97,6 +97,7 @@ import {
   deleteStudyNote,
   subscribeAllStudyNotes,
 } from "../services/studyNotes";
+import { subscribeAllTestEntries, summarizeTestAnalytics, type TestAnalytics } from "../services/testLeaderboard";
 import {
   subscribeSiteStatsSummary,
   subscribeDailyVisits,
@@ -120,7 +121,7 @@ const ADMIN_TABS = [
   { id: "manage_study_notes", label: "Manage Study Notes", icon: FolderTree },
   { id: "test_sessions", label: "Test Sessions", icon: ClipboardList },
   { id: "manage_access", label: "Manage Access", icon: Users },
-  { id: "site_stats", label: "Site Visits", icon: BarChart3 },
+  { id: "site_stats", label: "Analytics", icon: BarChart3 },
   { id: "firebase_usage", label: "Firebase Usage", icon: HardDrive },
 ] as const;
 
@@ -325,6 +326,15 @@ export default function AdminPanel() {
       unsubSummary();
       unsubDaily();
     };
+  }, [activeTab]);
+
+  // Test Series analytics — who attempted which test. Derived from the test_leaderboard
+  // collection (one doc per test+student, written when a student starts a test), so
+  // admin previews are never counted. Only subscribed while the Analytics tab is open.
+  const [testStats, setTestStats] = useState<TestAnalytics | null>(null);
+  useEffect(() => {
+    if (activeTab !== "site_stats") return;
+    return subscribeAllTestEntries((entries) => setTestStats(summarizeTestAnalytics(entries)));
   }, [activeTab]);
 
   const todaysVisits = dailyVisits.length > 0 ? dailyVisits[dailyVisits.length - 1].count : 0;
@@ -3712,7 +3722,7 @@ export default function AdminPanel() {
               <BarChart3 size={18} color={t.purple} className="mt-0.5 shrink-0" />
               <div>
                 <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
-                  Site Visits
+                  Analytics
                 </h2>
                 <p className="mt-1 text-xs" style={{ color: t.textMuted }}>
                   Counts one visit per browser session (not every page view), so this reflects
@@ -3755,6 +3765,66 @@ export default function AdminPanel() {
                   </div>
                 </Card>
               </div>
+
+
+              {/* Test Series: how many students attempted tests */}
+              <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+                <div className="mb-1 flex items-center gap-2">
+                  <ClipboardList size={16} color={t.purple} />
+                  <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>Test Series Attempts</span>
+                </div>
+                <p className="mb-4 text-xs" style={{ color: t.textMuted }}>
+                  An attempt counts when a student taps Start on a test. Admin previews aren&apos;t counted.
+                </p>
+                {testStats === null ? (
+                  <Spinner t={t} size={20} label="Loading test stats&hellip;" />
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-4">
+                      {[
+                        { label: "Students attempted", value: testStats.uniqueStudents },
+                        { label: "Students finished", value: testStats.uniqueCompleted },
+                        { label: "Total attempts", value: testStats.totalAttempts },
+                        { label: "Tests attempted", value: testStats.testsAttempted },
+                      ].map((s) => (
+                        <div key={s.label} className="rounded-2xl p-3" style={{ backgroundColor: t.surfaceAlt }}>
+                          <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>{s.label}</div>
+                          <div style={{ fontFamily: FONT_MONO, fontWeight: 800, fontSize: 28, marginTop: 4 }}>{s.value.toLocaleString()}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {testStats.perTest.length === 0 ? (
+                      <p className="mt-4 text-sm" style={{ color: t.textFaint }}>No student has attempted a test yet.</p>
+                    ) : (
+                      <div className="mt-4 overflow-x-auto">
+                        <table className="w-full text-left text-xs" style={{ minWidth: 480 }}>
+                          <thead>
+                            <tr style={{ color: t.textFaint }}>
+                              <th className="py-2 pr-3 font-bold">Test</th>
+                              <th className="py-2 pr-3 text-right font-bold">Students</th>
+                              <th className="py-2 pr-3 text-right font-bold">Finished</th>
+                              <th className="py-2 pr-3 text-right font-bold">Attempts</th>
+                              <th className="py-2 text-right font-bold">Avg score</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {testStats.perTest.map((r) => (
+                              <tr key={r.testId} style={{ borderTop: `1px solid ${t.border}` }}>
+                                <td className="max-w-[220px] truncate py-2.5 pr-3 font-bold">{r.testName}</td>
+                                <td className="py-2.5 pr-3 text-right" style={{ fontFamily: FONT_MONO }}>{r.students}</td>
+                                <td className="py-2.5 pr-3 text-right" style={{ fontFamily: FONT_MONO }}>{r.completedStudents}</td>
+                                <td className="py-2.5 pr-3 text-right" style={{ fontFamily: FONT_MONO }}>{r.attempts}</td>
+                                <td className="py-2.5 text-right" style={{ fontFamily: FONT_MONO }}>{r.completedStudents > 0 ? `${r.avgPct}%` : "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </Card>
 
               {/* Trend chart */}
               <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>

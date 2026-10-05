@@ -3,6 +3,7 @@ import { ClipboardList, Plus, Trash2, Eye, EyeOff, Loader2, ChevronDown, Chevron
 import Card from "../Card";
 import Pill from "../Pill";
 import Btn from "../Btn";
+import Toggle from "../Toggle";
 import { FONT_DISPLAY, FONT_MONO, type ThemeTokens } from "../../theme";
 import { MASTER_MODULES, SUBJECT_LIST, SUBJECT_META, TOTAL_BLOCKS } from "../../data/subjects";
 import { subscribeScopedQuestions } from "../../services/adminContent";
@@ -11,6 +12,7 @@ import {
   createTestSession,
   deleteTestSession,
   removeQuestionFromTestSession,
+  setTestSessionShowAnswersAtEnd,
   setTestSessionStatus,
   subscribeAllTestSessions,
 } from "../../services/testSessions";
@@ -85,6 +87,15 @@ export default function TestSessionsManager({ t }: { t: ThemeTokens }) {
     try {
       await setTestSessionStatus(test.id, test.status === "published" ? "draft" : "published");
       ok(test.status === "published" ? `"${test.name}" hidden from students.` : `"${test.name}" is now live for students.`);
+    } catch (e) {
+      err(e);
+    }
+  };
+
+  const handleToggleAnswersAtEnd = async (test: TestSessionDoc, value: boolean) => {
+    try {
+      await setTestSessionShowAnswersAtEnd(test.id, value);
+      ok(value ? `"${test.name}": answers are now revealed only at the end.` : `"${test.name}": answers are now shown right after each MCQ.`);
     } catch (e) {
       err(e);
     }
@@ -202,6 +213,21 @@ export default function TestSessionsManager({ t }: { t: ThemeTokens }) {
                     Delete
                   </Btn>
                 </div>
+              </div>
+
+              <div
+                className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3"
+                style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-bold">Show answers only at the end</div>
+                  <p className="mt-0.5 text-xs" style={{ color: t.textMuted }}>
+                    {test.showAnswersAtEnd
+                      ? "On: students won't see right/wrong or explanations until they finish the test."
+                      : "Off: students see the correct answer and explanation right after each MCQ."}
+                  </p>
+                </div>
+                <Toggle t={t} checked={test.showAnswersAtEnd} onChange={(v) => handleToggleAnswersAtEnd(test, v)} />
               </div>
 
               {open && <TestEditor t={t} test={test} onNotice={setNotice} />}

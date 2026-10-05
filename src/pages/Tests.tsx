@@ -117,14 +117,22 @@ export default function Tests() {
     isPaidTest(test) && !(isAdmin || isPremium || testSeriesUnlocked);
 
   const start = (test: TestSessionDoc) => {
-    // Runs in the existing Mock Exam mode: OMR-style answering, strict countdown
-    // (1 minute per MCQ), answers locked until you finish.
-    const config: PracticeConfig = {
-      mode: "exam",
-      timing: "timed",
-      spacedRep: false,
-      difficultyFilter: "all",
-    };
+    // Default (showAnswersAtEnd): existing Mock Exam mode — OMR-style answering, strict
+    // countdown (1 minute per MCQ), nothing revealed until you finish. `deferResults` also
+    // keeps the one-question-at-a-time fallback (phones) from revealing answers.
+    // If the admin turned that off, run one-question-at-a-time with instant feedback and
+    // the same 1-minute-per-MCQ clock.
+    const deferResults = test.showAnswersAtEnd !== false;
+    const config: PracticeConfig = deferResults
+      ? { mode: "exam", timing: "timed", spacedRep: false, difficultyFilter: "all", deferResults: true }
+      : {
+          mode: "traditional",
+          timing: "timed",
+          customTimerSeconds: test.questions.length * 60,
+          spacedRep: false,
+          difficultyFilter: "all",
+          deferResults: false,
+        };
     startSession(
       {
         subjectId: "all",

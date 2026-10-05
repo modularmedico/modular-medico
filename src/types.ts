@@ -152,6 +152,11 @@ export interface PracticeConfig {
   timing: "untimed" | "timed";
   timerType?: "session" | "per_question";
   customTimerSeconds?: number | null;
+  /**
+   * Test Sessions only: when true the learner gets NO per-question feedback (no correct/incorrect
+   * colouring, no explanation) — everything is revealed on the results screen at the end.
+   */
+  deferResults?: boolean;
   timerPerQuestionSeconds?: number;
   spacedRep: boolean;
   difficultyFilter: Difficulty | "all";
@@ -266,6 +271,11 @@ export interface TestSessionDoc {
   status: QuestionStatus; // "draft" hidden from students, "published" visible on /tests
   questions: TestSessionQuestion[];
   sources: TestSessionSource[];
+  /**
+   * true (default) = students don't see whether an answer is right until they finish the test;
+   * false = each MCQ shows the correct answer + explanation right after it is submitted.
+   */
+  showAnswersAtEnd: boolean;
   createdAt: number;
 }
 
