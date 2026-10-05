@@ -14,6 +14,41 @@ import type { TestLeaderboardEntry } from "../types";
 
 const COL = "test_leaderboard";
 
+/** How many rows the leaderboard shows. */
+export const LEADERBOARD_TOP_N = 15;
+
+/* ------------------------- participant details (name + college) ------------------------- */
+
+export interface Participant {
+  name: string;
+  college: string;
+}
+
+const PARTICIPANT_KEY = "mm_test_participant";
+export const MAX_NAME_LEN = 60;
+export const MAX_COLLEGE_LEN = 100;
+
+/** Last name/college the student entered, so the pre-test form comes pre-filled. */
+export function loadParticipant(): Participant | null {
+  try {
+    const raw = localStorage.getItem(PARTICIPANT_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Partial<Participant>;
+    if (typeof p.name === "string" && typeof p.college === "string") return { name: p.name, college: p.college };
+  } catch {
+    /* storage unavailable or corrupt — just start with an empty form */
+  }
+  return null;
+}
+
+export function saveParticipant(p: Participant): void {
+  try {
+    localStorage.setItem(PARTICIPANT_KEY, JSON.stringify(p));
+  } catch {
+    /* non-fatal */
+  }
+}
+
 /** How long a student must wait before attempting the same test again. */
 export const RETAKE_COOLDOWN_MS = 2 * 60 * 60 * 1000;
 
@@ -50,6 +85,7 @@ const fromSnap = (d: { id: string; data: () => unknown }): TestLeaderboardEntry 
     testName: String(x.testName ?? "Test"),
     uid: String(x.uid ?? ""),
     displayName: String(x.displayName || "Student"),
+    college: String(x.college ?? ""),
     startedAt: toMillis(x.startedAt),
     completed: x.completed === true,
     correct: Number(x.correct ?? 0),
@@ -116,9 +152,10 @@ export async function beginTestAttempt(params: {
   testName: string;
   uid: string;
   displayName: string;
+  college: string;
   total: number;
 }): Promise<void> {
-  const { testId, testName, uid, displayName, total } = params;
+  const { testId, testName, uid, displayName, college, total } = params;
   const ref = doc(db, COL, entryId(testId, uid));
   const snap = await getDoc(ref);
 
@@ -128,6 +165,7 @@ export async function beginTestAttempt(params: {
       testName,
       uid,
       displayName: displayName || "Student",
+      college,
       startedAt: serverTimestamp(),
       completed: false,
       correct: 0,
@@ -146,6 +184,7 @@ export async function beginTestAttempt(params: {
   await updateDoc(ref, {
     startedAt: serverTimestamp(),
     displayName: displayName || existing.displayName,
+    college: college || existing.college,
     testName,
     attempts: existing.attempts + 1,
   });
@@ -155,12 +194,12 @@ export async function beginTestAttempt(params: {
 export async function finishTestAttempt(params: {
   testId: string;
   uid: string;
-  displayName: string;
   correct: number;
   total: number;
 }): Promise<void> {
   try {
-    const { testId, uid, displayName, correct, total } = params;
+    // Name + college were stamped when the attempt started and are deliberately left untouched here.
+    const { testId, uid, correct, total } = params;
     const ref = doc(db, COL, entryId(testId, uid));
     const snap = await getDoc(ref);
     if (!snap.exists()) return; // started without a lock doc (e.g. admin preview) — nothing to rank
@@ -181,7 +220,6 @@ export async function finishTestAttempt(params: {
       total,
       scorePct,
       timeTakenSec,
-      displayName: displayName || existing.displayName,
     });
   } catch (err) {
     console.warn("Failed to save test result to leaderboard:", err);
@@ -193,6 +231,7 @@ export async function finishTestAttempt(params: {
 export interface GlobalRow {
   uid: string;
   displayName: string;
+  college: string;
   correct: number;
   total: number;
   testsTaken: number;
@@ -211,13 +250,14 @@ export function rankGlobal(entries: TestLeaderboardEntry[]): GlobalRow[] {
   for (const e of entries) {
     const row =
       map.get(e.uid) ??
-      { uid: e.uid, displayName: e.displayName, correct: 0, total: 0, testsTaken: 0, avgPct: 0, timeTakenSec: 0, pctSum: 0 };
+      { uid: e.uid, displayName: e.displayName, college: e.college, correct: 0, total: 0, testsTaken: 0, avgPct: 0, timeTakenSec: 0, pctSum: 0 };
     row.correct += e.correct;
     row.total += e.total;
     row.testsTaken += 1;
     row.pctSum += e.scorePct;
     row.timeTakenSec += e.timeTakenSec;
     row.displayName = e.displayName || row.displayName;
+    row.college = e.college || row.college;
     map.set(e.uid, row);
   }
   return [...map.values()]

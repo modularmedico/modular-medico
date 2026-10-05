@@ -47,7 +47,6 @@ export default function Practice() {
   const isDark = useAppStore((s) => s.isDark);
   const uid = useAppStore((s) => s.uid);
   const isAdmin = useAppStore((s) => s.isAdmin);
-  const displayName = useAppStore((s) => s.displayName || s.profile?.displayName || "Student");
   const session = useAppStore((s) => s.session);
   const updateSession = useAppStore((s) => s.updateSession);
   const clearSession = useAppStore((s) => s.clearSession);
@@ -179,7 +178,6 @@ export default function Practice() {
     updateSession({ pos: newPos });
     setSelected(existing?.selected ?? null);
     setAnswered(!isOmr && !!existing && existing.selected !== null);
-    setCopied(false);
   };
 
   const advanceFrom = (q: number[], rec: Record<number, AnswerRecord>) => {
@@ -248,7 +246,6 @@ export default function Practice() {
       finishTestAttempt({
         testId: setRef.moduleId.slice("test-".length),
         uid,
-        displayName,
         correct: answers.filter((a) => a.correct).length,
         total: answers.length,
       });
@@ -625,6 +622,9 @@ export default function Practice() {
       </div>
 
       <Card t={t} style={{ padding: 24, position: "relative" }}>
+        {/* AI help is held back while a test is running (it would give away the answer);
+            it opens up per question on the results screen instead. */}
+        {!setRef.moduleId.startsWith("test-") && (
         <div className="mb-3 flex justify-end">
           <div className="relative">
             <button
@@ -655,6 +655,7 @@ export default function Practice() {
             )}
           </div>
         </div>
+        )}
 
         <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 18, lineHeight: 1.4, marginBottom: 20 }}>{question.q}</h2>
         <div className="flex flex-col gap-3">

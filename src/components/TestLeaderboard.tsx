@@ -4,6 +4,7 @@ import Card from "./Card";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import {
+  LEADERBOARD_TOP_N,
   rankGlobal,
   rankPerTest,
   subscribeLeaderboardEntries,
@@ -30,8 +31,8 @@ export default function TestLeaderboard({ tests, initialTestId = null }: Props) 
   const uid = useAppStore((s) => s.uid);
   const t = isDark ? THEME.dark : THEME.light;
 
-  // null = global (all tests combined)
-  const [scope, setScope] = useState<string | null>(initialTestId);
+  // One board per test (defaults to the first test); null = global (all tests combined)
+  const [scope, setScope] = useState<string | null>(initialTestId ?? tests[0]?.id ?? null);
   const [entries, setEntries] = useState<TestLeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +57,7 @@ export default function TestLeaderboard({ tests, initialTestId = null }: Props) 
   const globalRows = useMemo(() => (scope === null ? rankGlobal(entries) : []), [entries, scope]);
   const testRows = useMemo(() => (scope !== null ? rankPerTest(entries) : []), [entries, scope]);
   const rows = scope === null ? globalRows : testRows;
+  const topRows = rows.slice(0, LEADERBOARD_TOP_N);
 
   if (!uid) {
     return (
@@ -106,6 +108,7 @@ export default function TestLeaderboard({ tests, initialTestId = null }: Props) 
         {scope === null
           ? "Global ranking: each student's best score on every test added together. Ties go to the faster total time."
           : "Ranked by best score on this test. Ties go to the faster finish."}
+        {" "}Showing the top {LEADERBOARD_TOP_N}.
       </p>
 
       {loading ? (
@@ -135,7 +138,7 @@ export default function TestLeaderboard({ tests, initialTestId = null }: Props) 
           )}
 
           <Card t={t} style={{ padding: 0, overflow: "hidden" }}>
-            {rows.map((r, i) => {
+            {topRows.map((r, i) => {
               const rank = i + 1;
               const isMe = r.uid === uid;
               const isGlobalRow = scope === null;
@@ -162,6 +165,11 @@ export default function TestLeaderboard({ tests, initialTestId = null }: Props) 
                       {r.displayName}
                       {isMe && <span style={{ color: t.gold, fontSize: 11, marginLeft: 6 }}>You</span>}
                     </div>
+                    {r.college && (
+                      <div className="truncate text-[11px]" style={{ color: t.textMuted }}>
+                        {r.college}
+                      </div>
+                    )}
                     <div className="flex items-center gap-3 text-[11px]" style={{ color: t.textFaint }}>
                       <span className="inline-flex items-center gap-1">
                         <Clock size={10} /> {fmtTime(r.timeTakenSec)}
@@ -183,6 +191,11 @@ export default function TestLeaderboard({ tests, initialTestId = null }: Props) 
               );
             })}
           </Card>
+          {myIndex >= LEADERBOARD_TOP_N && (
+            <p style={{ color: t.textMuted, fontSize: 12, textAlign: "center" }}>
+              You're outside the top {LEADERBOARD_TOP_N} for now. Retake the test to climb the board.
+            </p>
+          )}
         </>
       )}
     </div>

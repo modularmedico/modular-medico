@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Crown, CheckCircle2, XCircle, RotateCcw, Trophy } from "lucide-react";
+import { Crown, CheckCircle2, XCircle, RotateCcw, Trophy, ChevronDown } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
+import AiExplain from "../components/AiExplain";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { SUBJECT_META } from "../data/subjects";
@@ -14,6 +16,7 @@ export default function Results() {
   const isPremium = useIsPremium();
   const lastResult = useAppStore((s) => s.lastResult);
   const t = isDark ? THEME.dark : THEME.light;
+  const [openQ, setOpenQ] = useState<number | null>(null);
 
   if (!lastResult) {
     return (
@@ -71,17 +74,65 @@ export default function Results() {
           {setRef.questions.map((q, i) => {
             const a = answers[i];
             const wasSkipped = !a.correct && a.selected === null;
+            const isOpen = isTest && openQ === i;
             return (
-              <div key={i} className="flex items-center gap-2 text-sm" style={{ color: t.textMuted }}>
-                {a.correct ? (
-                  <CheckCircle2 size={14} color={t.green} />
-                ) : wasSkipped ? (
-                  <div className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-dashed" style={{ borderColor: t.textFaint }} />
-                ) : (
-                  <XCircle size={14} color={t.red} />
+              <div key={i}>
+                {/* Test sessions: tap a question to review it and ask the AI tutor */}
+                <button
+                  type="button"
+                  disabled={!isTest}
+                  onClick={() => setOpenQ(isOpen ? null : i)}
+                  className="flex w-full items-center gap-2 text-left text-sm"
+                  style={{ color: t.textMuted, cursor: isTest ? "pointer" : "default" }}
+                >
+                  {a.correct ? (
+                    <CheckCircle2 size={14} color={t.green} className="shrink-0" />
+                  ) : wasSkipped ? (
+                    <div className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-dashed" style={{ borderColor: t.textFaint }} />
+                  ) : (
+                    <XCircle size={14} color={t.red} className="shrink-0" />
+                  )}
+                  <span className={isOpen ? "" : "truncate"}>{q.q}</span>
+                  {wasSkipped && <span className="shrink-0 text-xs" style={{ color: t.textFaint }}>Skipped</span>}
+                  {isTest && (
+                    <ChevronDown
+                      size={14}
+                      className="ml-auto shrink-0"
+                      style={{ transform: isOpen ? "rotate(180deg)" : undefined, transition: "transform 120ms" }}
+                    />
+                  )}
+                </button>
+
+                {isOpen && (
+                  <div className="mt-2 flex flex-col gap-1.5 rounded-2xl p-3" style={{ backgroundColor: t.surfaceAlt }}>
+                    {q.options.map((opt, oi) => {
+                      const isCorrectOpt = oi === q.correct;
+                      const isPicked = a.selected === oi;
+                      return (
+                        <div
+                          key={oi}
+                          className="flex gap-2 text-xs"
+                          style={{ color: isCorrectOpt ? t.green : isPicked ? t.red : t.textMuted, fontWeight: isCorrectOpt || isPicked ? 700 : 500 }}
+                        >
+                          <span style={{ fontFamily: FONT_MONO }}>{String.fromCharCode(65 + oi)}.</span>
+                          <span>
+                            {opt}
+                            {isCorrectOpt && " \u2713"}
+                            {isPicked && !isCorrectOpt && " (your answer)"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {q.explanation && (
+                      <p className="mt-1 text-xs" style={{ color: t.textMuted, lineHeight: 1.6 }}>
+                        {q.explanation}
+                      </p>
+                    )}
+                    <div className="mt-1">
+                      <AiExplain question={q.q} options={q.options} correct={q.correct} selected={a.selected} explanation={q.explanation} />
+                    </div>
+                  </div>
                 )}
-                <span className="truncate">{q.q}</span>
-                {wasSkipped && <span className="shrink-0 text-xs" style={{ color: t.textFaint }}>Skipped</span>}
               </div>
             );
           })}

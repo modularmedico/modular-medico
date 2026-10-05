@@ -117,7 +117,11 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && entryId == request.resource.data.testId + '_' + request.auth.uid
         && request.resource.data.startedAt == request.time
-        && request.resource.data.completed == false;
+        && request.resource.data.completed == false
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 60
+        && request.resource.data.college is string
+        && request.resource.data.college.size() <= 100;
 
       allow update: if isOwner(resource.data.uid) && (
         // (a) starting a new attempt: only after the 2-hour cooldown
@@ -125,14 +129,16 @@ service cloud.firestore {
           request.resource.data.startedAt == request.time
           && request.time >= resource.data.startedAt + duration.value(2, 'h')
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['startedAt', 'displayName', 'testName', 'attempts'])
+               .hasOnly(['startedAt', 'displayName', 'college', 'testName', 'attempts'])
+          && request.resource.data.displayName.size() <= 60
+          && request.resource.data.college.size() <= 100
         )
         // (b) saving a finished attempt's score: startedAt must stay as-is
         || (
           request.resource.data.startedAt == resource.data.startedAt
           && request.resource.data.correct <= request.resource.data.total
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['completed', 'correct', 'total', 'scorePct', 'timeTakenSec', 'displayName'])
+               .hasOnly(['completed', 'correct', 'total', 'scorePct', 'timeTakenSec'])
         )
       );
 

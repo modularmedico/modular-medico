@@ -281,6 +281,8 @@ export interface TestLeaderboardEntry {
   testName: string;
   uid: string;
   displayName: string;
+  /** Medical college the student entered before starting the test. */
+  college: string;
   /** Server time (ms) the latest attempt was started — drives the retake cooldown. */
   startedAt: number;
   /** True once at least one attempt has been finished and scored. */

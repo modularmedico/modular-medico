@@ -5,6 +5,7 @@ import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import PaidTestModal from "../components/PaidTestModal";
+import TestStartModal from "../components/TestStartModal";
 import TestLeaderboard from "../components/TestLeaderboard";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import {
@@ -20,7 +21,10 @@ import {
   CooldownError,
   cooldownRemaining,
   formatRemaining,
+  loadParticipant,
+  saveParticipant,
   subscribeMyTestEntries,
+  type Participant,
 } from "../services/testLeaderboard";
 import { SUBJECT_META, type SubjectId } from "../data/subjects";
 import type { PracticeConfig, TestLeaderboardEntry, TestSessionDoc, TestSessionSource } from "../types";
@@ -63,6 +67,8 @@ export default function Tests() {
   const [myEntries, setMyEntries] = useState<Record<string, TestLeaderboardEntry>>({});
   const [now, setNow] = useState(() => Date.now());
   const [startingId, setStartingId] = useState<string | null>(null);
+  // Test waiting on the student's name + college before it starts.
+  const [detailsPrompt, setDetailsPrompt] = useState<TestSessionDoc | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -157,18 +163,30 @@ export default function Tests() {
     }
     if (cooldownRemaining(myEntries[test.id]) > 0) return;
 
+    // Ask for name + college first; the test begins from confirmStart below.
+    setDetailsPrompt(test);
+  };
+
+  const confirmStart = async (test: TestSessionDoc, who: Participant) => {
+    if (!uid) return;
+    setStartError(null);
     setStartingId(test.id);
     try {
-      // Stamps the server-side start time, which starts the 2-hour lock.
+      // Stamps the server-side start time (which starts the 2-hour lock) and records
+      // the name + college shown on this test's leaderboard.
       await beginTestAttempt({
         testId: test.id,
         testName: test.name,
         uid,
-        displayName,
+        displayName: who.name,
+        college: who.college,
         total: test.questions.length,
       });
+      saveParticipant(who);
+      setDetailsPrompt(null);
       start(test);
     } catch (err) {
+      setDetailsPrompt(null);
       if (err instanceof CooldownError) {
         setNow(Date.now());
         setStartError(err.message);
@@ -372,6 +390,15 @@ export default function Tests() {
             );
           })}
         </div>
+      )}
+      {detailsPrompt && (
+        <TestStartModal
+          testName={detailsPrompt.name}
+          initial={loadParticipant() ?? { name: displayName === "Student" ? "" : displayName, college: "" }}
+          busy={startingId === detailsPrompt.id}
+          onClose={() => setDetailsPrompt(null)}
+          onSubmit={(who) => confirmStart(detailsPrompt, who)}
+        />
       )}
       {paidPrompt && (
         <PaidTestModal
