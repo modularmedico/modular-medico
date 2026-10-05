@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ClipboardList, Clock, HelpCircle, Play, Loader2, Lock, Unlock, Layers, BookOpen } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { ClipboardList, Clock, HelpCircle, Play, Loader2, Lock, Unlock, Layers, BookOpen, Trophy, Timer } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import PaidTestModal from "../components/PaidTestModal";
+import TestLeaderboard from "../components/TestLeaderboard";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import {
   useAppStore,
@@ -14,8 +15,15 @@ import {
 } from "../store/useAppStore";
 import { subscribePublishedTestSessions } from "../services/testSessions";
 import { subscribeFreeTests } from "../services/adminContent";
+import {
+  beginTestAttempt,
+  CooldownError,
+  cooldownRemaining,
+  formatRemaining,
+  subscribeMyTestEntries,
+} from "../services/testLeaderboard";
 import { SUBJECT_META, type SubjectId } from "../data/subjects";
-import type { PracticeConfig, TestSessionDoc, TestSessionSource } from "../types";
+import type { PracticeConfig, TestLeaderboardEntry, TestSessionDoc, TestSessionSource } from "../types";
 
 /** Unique (block, subjectId) pairs a test touches, de-duplicated and sorted for the badge row. */
 function uniqueSources(sources: TestSessionSource[]) {
@@ -32,6 +40,11 @@ function uniqueSources(sources: TestSessionSource[]) {
 
 export default function Tests() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: "tests" | "leaderboard" = searchParams.get("tab") === "leaderboard" ? "leaderboard" : "tests";
+  const leaderboardTestId = searchParams.get("test");
+  const uid = useAppStore((s) => s.uid);
+  const displayName = useAppStore((s) => s.displayName || s.profile?.displayName || "Student");
   const isDark = useAppStore((s) => s.isDark);
   const startSession = useAppStore((s) => s.startSession);
   const canAccess = useCanAccessTestSeries();
@@ -45,6 +58,28 @@ export default function Tests() {
 
   const [tests, setTests] = useState<TestSessionDoc[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // The student's own attempts, used for the 2-hour retake cooldown.
+  const [myEntries, setMyEntries] = useState<Record<string, TestLeaderboardEntry>>({});
+  const [now, setNow] = useState(() => Date.now());
+  const [startingId, setStartingId] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!uid) {
+      setMyEntries({});
+      return;
+    }
+    return subscribeMyTestEntries(uid, setMyEntries);
+  }, [uid]);
+
+  // Tick once a second, but only while at least one cooldown is actually running.
+  const anyCooling = Object.values(myEntries).some((e) => cooldownRemaining(e, now) > 0);
+  useEffect(() => {
+    if (!anyCooling) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [anyCooling]);
 
   const [paidPrompt, setPaidPrompt] = useState<TestSessionDoc | null>(null);
   const [freeTestIds, setFreeTestIds] = useState<string[]>([]);
@@ -103,12 +138,51 @@ export default function Tests() {
     navigate("/practice");
   };
 
-  const handleStart = (test: TestSessionDoc) => {
+  const handleStart = async (test: TestSessionDoc) => {
     if (isTestLocked(test)) {
       setPaidPrompt(test);
       return;
     }
-    start(test);
+    setStartError(null);
+
+    // Admins can preview any test freely — no lock, nothing written to the leaderboard.
+    if (isAdmin) {
+      start(test);
+      return;
+    }
+    // Rankings and the retake cooldown are tied to an account.
+    if (!uid) {
+      navigate("/login");
+      return;
+    }
+    if (cooldownRemaining(myEntries[test.id]) > 0) return;
+
+    setStartingId(test.id);
+    try {
+      // Stamps the server-side start time, which starts the 2-hour lock.
+      await beginTestAttempt({
+        testId: test.id,
+        testName: test.name,
+        uid,
+        displayName,
+        total: test.questions.length,
+      });
+      start(test);
+    } catch (err) {
+      if (err instanceof CooldownError) {
+        setNow(Date.now());
+        setStartError(err.message);
+      } else {
+        setStartError("Couldn't start the test. Check your connection and try again.");
+      }
+    } finally {
+      setStartingId(null);
+    }
+  };
+
+  const setTab = (next: "tests" | "leaderboard") => {
+    if (next === "tests") setSearchParams({}, { replace: true });
+    else setSearchParams({ tab: "leaderboard" }, { replace: true });
   };
 
   return (
@@ -120,6 +194,30 @@ export default function Tests() {
         </p>
       </div>
 
+      <div className="flex gap-2">
+        {(["tests", "leaderboard"] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-bold"
+            style={{
+              backgroundColor: tab === k ? t.gold : "transparent",
+              color: tab === k ? "#241A08" : t.textMuted,
+              border: `1.5px solid ${tab === k ? t.gold : t.border}`,
+            }}
+          >
+            {k === "tests" ? <ClipboardList size={14} /> : <Trophy size={14} />}
+            {k === "tests" ? "Tests" : "Leaderboard"}
+          </button>
+        ))}
+      </div>
+
+      {startError && (
+        <div className="rounded-2xl px-4 py-3 text-sm" style={{ backgroundColor: `${t.red}18`, color: t.red }}>
+          {startError}
+        </div>
+      )}
+
       {!canAccess ? (
         <Card t={t} style={{ textAlign: "center", padding: 32 }}>
           <Lock size={28} color={t.textFaint} style={{ margin: "0 auto 10px" }} />
@@ -128,6 +226,14 @@ export default function Tests() {
             Test Series access is currently switched off. Check back later or reach out to the team.
           </p>
         </Card>
+      ) : tab === "leaderboard" ? (
+        loading ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-sm" style={{ color: t.textMuted }}>
+            <Loader2 size={16} className="animate-spin" /> Loading&hellip;
+          </div>
+        ) : (
+          <TestLeaderboard tests={tests} initialTestId={leaderboardTestId} />
+        )
       ) : loading ? (
         <div className="flex items-center justify-center gap-2 py-16 text-sm" style={{ color: t.textMuted }}>
           <Loader2 size={16} className="animate-spin" /> Loading tests&hellip;
@@ -148,6 +254,9 @@ export default function Tests() {
             const locked = isTestLocked(test);
             const paid = isPaidTest(test);
             const srcs = uniqueSources(test.sources);
+            const mine = myEntries[test.id];
+            const cooling = !isAdmin ? cooldownRemaining(mine, now) : 0;
+            const starting = startingId === test.id;
 
             return (
               <Card key={test.id} t={t} className="flex flex-col gap-4">
@@ -216,9 +325,49 @@ export default function Tests() {
                   </span>
                 </div>
 
-                <Btn t={t} full icon={locked ? Lock : Play} onClick={() => handleStart(test)}>
-                  {locked ? "Paid — unlock to start" : "Start test"}
-                </Btn>
+                {mine?.completed && !isAdmin && (
+                  <div
+                    className="flex items-center justify-between rounded-2xl px-3.5 py-2.5 text-xs"
+                    style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}
+                  >
+                    <span>
+                      Your best:{" "}
+                      <b style={{ fontFamily: FONT_MONO, color: t.text }}>
+                        {mine.correct}/{mine.total}
+                      </b>{" "}
+                      ({mine.scorePct}%)
+                    </span>
+                    <button
+                      onClick={() => setSearchParams({ tab: "leaderboard", test: test.id }, { replace: true })}
+                      className="inline-flex items-center gap-1 font-bold"
+                      style={{ color: t.gold }}
+                    >
+                      <Trophy size={12} /> Ranking
+                    </button>
+                  </div>
+                )}
+
+                {cooling > 0 ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Btn t={t} full variant="ghost" icon={Timer} disabled>
+                      Retake in {formatRemaining(cooling)}
+                    </Btn>
+                    <p className="text-center text-[11px]" style={{ color: t.textFaint }}>
+                      You can attempt a test again 2 hours after you started it.
+                    </p>
+                  </div>
+                ) : (
+                  <Btn
+                    t={t}
+                    full
+                    icon={starting ? Loader2 : locked ? Lock : Play}
+                    spin={starting}
+                    disabled={starting}
+                    onClick={() => handleStart(test)}
+                  >
+                    {locked ? "Paid — unlock to start" : mine ? "Retake test" : "Start test"}
+                  </Btn>
+                )}
               </Card>
             );
           })}

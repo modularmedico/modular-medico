@@ -30,6 +30,7 @@ import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import { SUBJECT_META } from "../data/subjects";
 import { addBookmark, recordQuizAttempt } from "../services/firestore";
+import { finishTestAttempt } from "../services/testLeaderboard";
 import type { AnswerRecord } from "../types";
 
 type AiMode = "simple" | "analogy" | "mnemonic" | "depth";
@@ -45,6 +46,8 @@ export default function Practice() {
   const navigate = useNavigate();
   const isDark = useAppStore((s) => s.isDark);
   const uid = useAppStore((s) => s.uid);
+  const isAdmin = useAppStore((s) => s.isAdmin);
+  const displayName = useAppStore((s) => s.displayName || s.profile?.displayName || "Student");
   const session = useAppStore((s) => s.session);
   const updateSession = useAppStore((s) => s.updateSession);
   const clearSession = useAppStore((s) => s.clearSession);
@@ -238,6 +241,16 @@ export default function Practice() {
         scorePct: Math.round((correctCount / answers.length) * 100),
       }).catch(() => {
         /* non-fatal — the local result still shows even if the write fails */
+      });
+    }
+    // Test Series sessions also post their score to the leaderboard (admin previews don't).
+    if (uid && !isAdmin && setRef.moduleId.startsWith("test-")) {
+      finishTestAttempt({
+        testId: setRef.moduleId.slice("test-".length),
+        uid,
+        displayName,
+        correct: answers.filter((a) => a.correct).length,
+        total: answers.length,
       });
     }
     clearSession();

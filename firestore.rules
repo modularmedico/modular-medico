@@ -103,6 +103,43 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
+    // Test Series leaderboard + retake cooldown. One doc per (test, student):
+    // test_leaderboard/{testId}_{uid}. Any signed-in student can read the board.
+    // `startedAt` must be the server time, and a student can only start the same
+    // test again 2 hours after their previous start. The score fields can be
+    // updated by the owner without touching `startedAt`. Admins can delete an
+    // entry (that also resets the student's cooldown for that test).
+    // ---------------------------------------------------------------
+    match /test_leaderboard/{entryId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && entryId == request.resource.data.testId + '_' + request.auth.uid
+        && request.resource.data.startedAt == request.time
+        && request.resource.data.completed == false;
+
+      allow update: if isOwner(resource.data.uid) && (
+        // (a) starting a new attempt: only after the 2-hour cooldown
+        (
+          request.resource.data.startedAt == request.time
+          && request.time >= resource.data.startedAt + duration.value(2, 'h')
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['startedAt', 'displayName', 'testName', 'attempts'])
+        )
+        // (b) saving a finished attempt's score: startedAt must stay as-is
+        || (
+          request.resource.data.startedAt == resource.data.startedAt
+          && request.resource.data.correct <= request.resource.data.total
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['completed', 'correct', 'total', 'scorePct', 'timeTakenSec', 'displayName'])
+        )
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------
     // App-wide settings, e.g. settings/freeBlocks ({ blocks: number[] }),
     // which Blocks are free for everyone, or settings/testSeriesAccess
     // ({ enabled: boolean }), whether students can access Test Series.

@@ -268,3 +268,27 @@ export interface TestSessionDoc {
   sources: TestSessionSource[];
   createdAt: number;
 }
+
+/**
+ * One student's standing on one Test Session, stored in `test_leaderboard/{testId}_{uid}`.
+ * Doubles as the retake lock: `startedAt` is stamped by the server each time a test is
+ * started and a new attempt is only allowed 2 hours after it. The score fields hold the
+ * student's BEST finished attempt.
+ */
+export interface TestLeaderboardEntry {
+  id: string;
+  testId: string;
+  testName: string;
+  uid: string;
+  displayName: string;
+  /** Server time (ms) the latest attempt was started — drives the retake cooldown. */
+  startedAt: number;
+  /** True once at least one attempt has been finished and scored. */
+  completed: boolean;
+  correct: number;
+  total: number;
+  scorePct: number;
+  /** Seconds taken for the best attempt (tie-breaker: faster wins). */
+  timeTakenSec: number;
+  attempts: number;
+}

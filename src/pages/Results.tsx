@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Crown, CheckCircle2, XCircle, RotateCcw } from "lucide-react";
+import { Crown, CheckCircle2, XCircle, RotateCcw, Trophy } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
@@ -102,6 +102,17 @@ export default function Results() {
           {isTest ? "Back to tests" : "Practice again"}
         </Btn>
       </div>
+      {isTest && (
+        <Btn
+          t={t}
+          variant="ghost"
+          full
+          icon={Trophy}
+          onClick={() => navigate(`/tests?tab=leaderboard&test=${setRef.moduleId.slice("test-".length)}`)}
+        >
+          View leaderboard
+        </Btn>
+      )}
       {isLoggedIn && !isPremium && (
         <Card t={t} style={{ borderColor: t.gold }}>
           <div className="mb-2 flex items-center gap-2">
