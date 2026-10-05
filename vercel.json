@@ -5,11 +5,14 @@
   "functions": {
     "api/ai-explain.js": {
       "maxDuration": 30
+    },
+    "api/firebase-usage.js": {
+      "maxDuration": 30
     }
   },
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]

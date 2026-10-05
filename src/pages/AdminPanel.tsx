@@ -37,6 +37,7 @@ import {
   Lock,
   Unlock,
   ClipboardList,
+  HardDrive,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Card from "../components/Card";
@@ -105,6 +106,7 @@ import { parseBracketFormat } from "../utils/parseBracketFormat";
 import FreeSubjectsManager from "../components/admin/FreeSubjectsManager";
 import FreeTestsManager from "../components/admin/FreeTestsManager";
 import TestSessionsManager from "../components/admin/TestSessionsManager";
+import FirebaseUsagePanel from "../components/admin/FirebaseUsagePanel";
 import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreStudyNote, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 
 const ADMIN_TABS = [
@@ -119,6 +121,7 @@ const ADMIN_TABS = [
   { id: "test_sessions", label: "Test Sessions", icon: ClipboardList },
   { id: "manage_access", label: "Manage Access", icon: Users },
   { id: "site_stats", label: "Site Visits", icon: BarChart3 },
+  { id: "firebase_usage", label: "Firebase Usage", icon: HardDrive },
 ] as const;
 
 type AdminTab = typeof ADMIN_TABS[number]["id"];
@@ -3792,6 +3795,8 @@ export default function AdminPanel() {
           )}
         </div>
       )}
+
+      {activeTab === "firebase_usage" && <FirebaseUsagePanel />}
     </div>
 
   );
