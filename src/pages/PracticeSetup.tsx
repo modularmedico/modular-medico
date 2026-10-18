@@ -460,6 +460,168 @@ export default function PracticeSetup() {
       </div>
 
       <Card t={t} className="flex flex-col gap-5 p-6" style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+        {/* Subheading — 4th tier of the hierarchy, only shown when this Subject/Module has any.
+            Pulled to the top and styled as a prominent box grid (rather than small pills) since
+            picking a subheading is usually the first decision a student makes here. */}
+        {isSubjectInModule && (topics.length > 0 || !topicsLoaded) && (
+          <div
+            className="rounded-2xl p-4"
+            style={{ backgroundColor: `${t.teal}0d`, border: `2px solid ${t.teal}40` }}
+          >
+            <span className="mb-3 block text-xs font-bold uppercase tracking-wide" style={{ color: t.teal }}>
+              Subheading
+            </span>
+            {!topicsLoaded ? (
+              <span className="flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
+                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
+              </span>
+            ) : (
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                <button
+                  onClick={() => setSelectedTopicName("")}
+                  className="col-span-2 rounded-xl px-4 py-3 text-sm font-bold transition-all hover:scale-[1.01] sm:col-span-3"
+                  style={{
+                    backgroundColor: selectedTopicName === "" ? t.purpleStrong : t.surfaceAlt,
+                    color: selectedTopicName === "" ? "#fff" : t.text,
+                    border: `2px solid ${selectedTopicName === "" ? t.purpleStrong : t.border}`,
+                  }}
+                >
+                  All Subheadings
+                </button>
+                {topics.map((s) => {
+                  const active = selectedTopicName === s.name;
+                  return (
+                    <button
+                      key={s.name}
+                      onClick={() => setSelectedTopicName(s.name)}
+                      className="rounded-xl px-3 py-3 text-sm font-bold transition-all hover:scale-[1.02]"
+                      style={{
+                        backgroundColor: active ? t.teal : t.surfaceAlt,
+                        color: active ? "#fff" : t.text,
+                        border: `2px solid ${active ? t.teal : t.border}`,
+                      }}
+                    >
+                      {s.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Subheading — Module-wide picker, shown when practicing a whole Module ("Practice
+            Module") that has published MCQs tagged with subheadings across its subjects.
+            Each option is a (subject, subheading) pair — labelled with its subject — so two
+            different subjects' identically-named subheadings are never conflated. */}
+        {isModuleExam && (moduleTopicOptions.length > 0 || !moduleTopicsLoaded) && (
+          <div
+            className="rounded-2xl p-4"
+            style={{ backgroundColor: `${t.teal}0d`, border: `2px solid ${t.teal}40` }}
+          >
+            <span className="mb-3 block text-xs font-bold uppercase tracking-wide" style={{ color: t.teal }}>
+              Subheading
+            </span>
+            {!moduleTopicsLoaded ? (
+              <p className="flex items-center gap-1.5 text-xs" style={{ color: t.textMuted }}>
+                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                <button
+                  onClick={() => setSelectedModuleTopic(null)}
+                  className="col-span-2 rounded-xl px-4 py-3 text-sm font-bold transition-all hover:scale-[1.01] sm:col-span-3"
+                  style={{
+                    backgroundColor: selectedModuleTopic === null ? t.purpleStrong : t.surfaceAlt,
+                    color: selectedModuleTopic === null ? "#fff" : t.text,
+                    border: `2px solid ${selectedModuleTopic === null ? t.purpleStrong : t.border}`,
+                  }}
+                >
+                  All Subheadings
+                </button>
+                {moduleTopicOptions.map((opt) => {
+                  const subjLabel = SUBJECT_META[opt.subjectId as keyof typeof SUBJECT_META]?.label || opt.subjectId;
+                  const active =
+                    selectedModuleTopic?.subjectId === opt.subjectId && selectedModuleTopic?.name === opt.name;
+                  return (
+                    <button
+                      key={`${opt.subjectId}::${opt.name}`}
+                      onClick={() => setSelectedModuleTopic(opt)}
+                      className="rounded-xl px-3 py-3 text-sm font-bold transition-all hover:scale-[1.02]"
+                      style={{
+                        backgroundColor: active ? t.teal : t.surfaceAlt,
+                        color: active ? "#fff" : t.text,
+                        border: `2px solid ${active ? t.teal : t.border}`,
+                      }}
+                    >
+                      <span style={{ opacity: 0.65, fontWeight: 600 }}>{subjLabel}:</span> {opt.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Subheadings — Block-wide picker, shown when practicing a whole Block ("Full Exam")
+            that has published MCQs tagged with subheadings across its subjects. Unlike the
+            single-select pickers above, several subheadings can be ticked at once — each
+            option is a (subject, subheading) pair, labelled with its subject in brackets, so
+            two different subjects' identically-named subheadings are never conflated. */}
+        {isFullBlock && (blockTopicOptions.length > 0 || !blockTopicsLoaded) && (
+          <div
+            className="rounded-2xl p-4"
+            style={{ backgroundColor: `${t.teal}0d`, border: `2px solid ${t.teal}40` }}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wide" style={{ color: t.teal }}>
+                Subheadings
+              </span>
+              {selectedBlockTopics.size > 0 && (
+                <button
+                  onClick={() => setSelectedBlockTopics(new Set())}
+                  className="text-[11px] font-bold underline"
+                  style={{ color: t.purple }}
+                >
+                  Clear ({selectedBlockTopics.size})
+                </button>
+              )}
+            </div>
+            {!blockTopicsLoaded ? (
+              <span className="flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
+                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
+              </span>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                  {blockTopicOptions.map((opt) => {
+                    const key = blockTopicKey(opt.subjectId, opt.name);
+                    const subjLabel = SUBJECT_META[opt.subjectId as keyof typeof SUBJECT_META]?.label || opt.subjectId;
+                    const active = selectedBlockTopics.has(key);
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => toggleBlockTopic(key)}
+                        className="rounded-xl px-3 py-3 text-sm font-bold transition-all hover:scale-[1.02]"
+                        style={{
+                          backgroundColor: active ? t.teal : t.surfaceAlt,
+                          color: active ? "#fff" : t.text,
+                          border: `2px solid ${active ? t.teal : t.border}`,
+                        }}
+                      >
+                        {opt.name} <span style={{ opacity: 0.65, fontWeight: 600 }}>({subjLabel})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-[11px]" style={{ color: t.textFaint }}>
+                  Tap to select one or more. Leave empty to include every subheading.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Practice Mode */}
         <div>
           <span className="mb-2 block text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
@@ -560,128 +722,6 @@ export default function PracticeSetup() {
             </div>
           )}
         </div>
-
-        {/* Subheading — 4th tier of the hierarchy, only shown when this Subject/Module has any */}
-        {isSubjectInModule && (topics.length > 0 || !topicsLoaded) && (
-          <div>
-            <span className="mb-2 block text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
-              Subheading
-            </span>
-            {!topicsLoaded ? (
-              <span className="flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
-                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
-              </span>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                <Pill t={t} tone="muted" active={selectedTopicName === ""} onClick={() => setSelectedTopicName("")}>
-                  All Subheadings
-                </Pill>
-                {topics.map((s) => (
-                  <Pill
-                    key={s.name}
-                    t={t}
-                    tone="teal"
-                    active={selectedTopicName === s.name}
-                    onClick={() => setSelectedTopicName(s.name)}
-                  >
-                    {s.name}
-                  </Pill>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Subheading — Module-wide picker, shown when practicing a whole Module ("Practice
-            Module") that has published MCQs tagged with subheadings across its subjects.
-            Each option is a (subject, subheading) pair — labelled with its subject — so two
-            different subjects' identically-named subheadings are never conflated. */}
-        {isModuleExam && (moduleTopicOptions.length > 0 || !moduleTopicsLoaded) && (
-          <div>
-            <span className="mb-2 block text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
-              Subheading
-            </span>
-            {!moduleTopicsLoaded ? (
-              <p className="flex items-center gap-1.5 text-xs" style={{ color: t.textMuted }}>
-                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                <Pill
-                  t={t}
-                  tone="muted"
-                  active={selectedModuleTopic === null}
-                  onClick={() => setSelectedModuleTopic(null)}
-                >
-                  All Subheadings
-                </Pill>
-                {moduleTopicOptions.map((opt) => {
-                  const subjLabel = SUBJECT_META[opt.subjectId as keyof typeof SUBJECT_META]?.label || opt.subjectId;
-                  const active =
-                    selectedModuleTopic?.subjectId === opt.subjectId && selectedModuleTopic?.name === opt.name;
-                  return (
-                    <Pill
-                      key={`${opt.subjectId}::${opt.name}`}
-                      t={t}
-                      tone="teal"
-                      active={active}
-                      onClick={() => setSelectedModuleTopic(opt)}
-                    >
-                      <span style={{ opacity: 0.65, fontWeight: 600 }}>{subjLabel}:</span> {opt.name}
-                    </Pill>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Subheadings — Block-wide picker, shown when practicing a whole Block ("Full Exam")
-            that has published MCQs tagged with subheadings across its subjects. Unlike the
-            single-select pickers above, several subheadings can be ticked at once — each
-            option is a (subject, subheading) pair, labelled with its subject in brackets, so
-            two different subjects' identically-named subheadings are never conflated. */}
-        {isFullBlock && (blockTopicOptions.length > 0 || !blockTopicsLoaded) && (
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wide" style={{ color: t.textFaint }}>
-                Subheadings
-              </span>
-              {selectedBlockTopics.size > 0 && (
-                <button
-                  onClick={() => setSelectedBlockTopics(new Set())}
-                  className="text-[11px] font-bold underline"
-                  style={{ color: t.purple }}
-                >
-                  Clear ({selectedBlockTopics.size})
-                </button>
-              )}
-            </div>
-            {!blockTopicsLoaded ? (
-              <span className="flex items-center gap-1.5 text-xs" style={{ color: t.textFaint }}>
-                <Loader2 size={13} className="animate-spin" /> Checking subheadings&hellip;
-              </span>
-            ) : (
-              <>
-                <div className="flex flex-wrap gap-2">
-                  {blockTopicOptions.map((opt) => {
-                    const key = blockTopicKey(opt.subjectId, opt.name);
-                    const subjLabel = SUBJECT_META[opt.subjectId as keyof typeof SUBJECT_META]?.label || opt.subjectId;
-                    const active = selectedBlockTopics.has(key);
-                    return (
-                      <Pill key={key} t={t} tone="teal" active={active} onClick={() => toggleBlockTopic(key)}>
-                        {opt.name} <span style={{ opacity: 0.65, fontWeight: 600 }}>({subjLabel})</span>
-                      </Pill>
-                    );
-                  })}
-                </div>
-                <p className="mt-1.5 text-[11px]" style={{ color: t.textFaint }}>
-                  Tap to select one or more. Leave empty to include every subheading.
-                </p>
-              </>
-            )}
-          </div>
-        )}
 
         {/* Difficulty */}
         <div>
