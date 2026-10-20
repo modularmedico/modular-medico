@@ -164,7 +164,7 @@ export default function Subjects() {
             </span>
           </div>
           <p className="text-xs" style={{ color: t.textMuted, marginTop: 2 }}>
-            Previous university exam papers, organized by Block &amp; Subject.
+            Previous UHS exams
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
