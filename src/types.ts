@@ -142,6 +142,24 @@ export interface FirestoreStudyNote {
   createdAt?: number;
 }
 
+/**
+ * A single Past Paper document as stored in the Firestore `past_papers`
+ * collection. Scoped to Block -> Subject only (no Module/Topic) — these are
+ * whole previous-exam PDFs (e.g. "Block 3 Final Term Paper 2024"), not tied
+ * to a specific Module the way MCQs, Lectures, and Study Notes are.
+ */
+export interface FirestorePastPaper {
+  id: string;
+  title: string;
+  driveUrl: string;
+  description?: string;
+  block: number; // 1..15
+  subjectId: string;
+  status: QuestionStatus; // reuse "draft" | "published"
+  order?: number;
+  createdAt?: number;
+}
+
 export interface AnswerRecord {
   selected: number | null;
   correct: boolean;

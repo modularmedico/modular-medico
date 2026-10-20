@@ -94,6 +94,14 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // Past Papers: same access pattern as questions/lectures — guests/students
+    // can read only published past papers, admins can read/write everything
+    // (drafts included).
+    match /past_papers/{paperId} {
+      allow get, list: if resource.data.status == 'published' || isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
     // Test Sessions: curated MCQ tests built in the admin "Test Sessions" tab.
     // Students may only read published tests (their query must filter on
     // status == 'published'); admins can read/write everything, drafts included.

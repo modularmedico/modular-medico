@@ -5,6 +5,8 @@ import {
   BookOpen,
   Layers,
   Lock,
+  FileStack,
+  ArrowRight,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
@@ -21,6 +23,7 @@ import {
   subscribeBlockCounts,
   subscribeSubjectCounts,
 } from "../services/adminContent";
+import { subscribePublishedPastPapers } from "../services/pastPapers";
 
 export default function Subjects() {
   const navigate = useNavigate();
@@ -47,6 +50,14 @@ export default function Subjects() {
   const [subjectCounts, setSubjectCounts] = useState<Record<string, number> | null>(null);
 
   useEffect(() => subscribeBlockDefinitions(setBlockDefs), []);
+
+  // Past Papers count — powers the prominent banner below (student-facing,
+  // published-only; counted exactly like the OSPE/Lectures libraries).
+  const [pastPaperCount, setPastPaperCount] = useState<number | null>(null);
+  useEffect(() => {
+    const unsub = subscribePublishedPastPapers((papers) => setPastPaperCount(papers.length));
+    return () => unsub();
+  }, []);
 
   const blockKey = blockDefs.map((b) => b.block).join(",");
   useEffect(() => {
@@ -121,6 +132,49 @@ export default function Subjects() {
           >
             <BookOpen size={14} /> {SUBJECT_LIST.length} Subjects
           </button>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* PAST PAPERS — prominent banner, always visible regardless of the Block/  */}
+      {/* Subject tab above, so it reads as its own top-level section.             */}
+      {/* ========================================================================= */}
+      <div
+        onClick={() => navigate("/past-papers")}
+        className="flex cursor-pointer items-center gap-4 rounded-[22px] p-5 transition-all hover:scale-[1.005]"
+        style={{
+          background: `linear-gradient(120deg, ${t.gold}26, ${t.purpleStrong}18)`,
+          border: `1.5px solid ${t.gold}55`,
+        }}
+      >
+        <div
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
+          style={{ backgroundColor: `${t.gold}30` }}
+        >
+          <FileStack size={22} color={t.gold} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 17 }}>Past Papers</h3>
+            <span
+              className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+              style={{ backgroundColor: t.gold, color: "#241A08" }}
+            >
+              New
+            </span>
+          </div>
+          <p className="text-xs" style={{ color: t.textMuted, marginTop: 2 }}>
+            Previous university exam papers, organized by Block &amp; Subject.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className="rounded-full px-2.5 py-1 font-mono text-xs font-bold"
+            style={{ backgroundColor: `${t.gold}20`, color: t.gold }}
+          >
+            {pastPaperCount === null ? "Loading\u2026" : `${pastPaperCount} Papers`}
+          </span>
+          <ArrowRight size={16} color={t.textFaint} />
         </div>
       </div>
 

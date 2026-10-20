@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   PlusCircle,
@@ -38,6 +38,8 @@ import {
   Unlock,
   ClipboardList,
   HardDrive,
+  FileStack,
+  Archive,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Card from "../components/Card";
@@ -97,6 +99,12 @@ import {
   deleteStudyNote,
   subscribeAllStudyNotes,
 } from "../services/studyNotes";
+import {
+  addPastPaper,
+  updatePastPaperStatus,
+  deletePastPaper,
+  subscribeAllPastPapers,
+} from "../services/pastPapers";
 import { subscribeAllTestEntries, summarizeTestAnalytics, type TestAnalytics } from "../services/testLeaderboard";
 import {
   subscribeSiteStatsSummary,
@@ -108,7 +116,7 @@ import FreeSubjectsManager from "../components/admin/FreeSubjectsManager";
 import FreeTestsManager from "../components/admin/FreeTestsManager";
 import TestSessionsManager from "../components/admin/TestSessionsManager";
 import FirebaseUsagePanel from "../components/admin/FirebaseUsagePanel";
-import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreStudyNote, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
+import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreStudyNote, FirestorePastPaper, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 
 const ADMIN_TABS = [
   { id: "add_mcq", label: "Add MCQs", icon: PlusCircle },
@@ -119,6 +127,8 @@ const ADMIN_TABS = [
   { id: "manage_ospe_book", label: "Manage OSPE Material", icon: Library },
   { id: "add_study_notes", label: "Add Study Notes", icon: GraduationCap },
   { id: "manage_study_notes", label: "Manage Study Notes", icon: FolderTree },
+  { id: "add_past_paper", label: "Add Past Paper", icon: FileStack },
+  { id: "manage_past_paper", label: "Manage Past Papers", icon: Archive },
   { id: "test_sessions", label: "Test Sessions", icon: ClipboardList },
   { id: "manage_access", label: "Manage Access", icon: Users },
   { id: "site_stats", label: "Analytics", icon: BarChart3 },
@@ -416,6 +426,12 @@ export default function AdminPanel() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  // Long-press multi-select: selected MCQ ids + batch-delete confirm state.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedDeleteConfirm, setSelectedDeleteConfirm] = useState(false);
+  const longPressTimer = useRef<number | null>(null);
+  const longPressStart = useRef<{ x: number; y: number } | null>(null);
+  const longPressFired = useRef(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   // Inline "edit this MCQ" state — id of the card currently expanded into edit
@@ -761,6 +777,112 @@ export default function AdminPanel() {
   }, [ospeBooks, ospeFilterSubject, ospeFilterStatus, ospeSearchQuery]);
 
   /* ------------------------------------------------------------------------- */
+  /* PAST PAPERS STATE (Block + Subject scoped only — a Google Drive PDF link  */
+  /* per previous exam paper, no Module/Topic)                                 */
+  /* ------------------------------------------------------------------------- */
+  const [pastPapers, setPastPapers] = useState<FirestorePastPaper[]>([]);
+  const [loadingPastPapers, setLoadingPastPapers] = useState(true);
+  const [pastPaperBankWarning, setPastPaperBankWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadingPastPapers(true);
+    const unsub = subscribeAllPastPapers(
+      (papers) => {
+        setPastPapers(papers);
+        setLoadingPastPapers(false);
+      },
+      (_reason, message) => setPastPaperBankWarning(message)
+    );
+    return () => unsub();
+  }, []);
+
+  const [pastPaperBlock, setPastPaperBlock] = useState<number>(1);
+  const [pastPaperSubjectId, setPastPaperSubjectId] = useState<SubjectId>("gross_anatomy");
+  const [pastPaperTitle, setPastPaperTitle] = useState("");
+  const [pastPaperDriveUrl, setPastPaperDriveUrl] = useState("");
+  const [pastPaperDescription, setPastPaperDescription] = useState("");
+  const [pastPaperPublishImmediately, setPastPaperPublishImmediately] = useState(true);
+  const [pastPaperSaveStatus, setPastPaperSaveStatus] = useState<"success" | "success-local" | "error" | null>(null);
+  const [pastPaperSaveWarning, setPastPaperSaveWarning] = useState<string | null>(null);
+
+  const isPastPaperValid = pastPaperTitle.trim().length > 0 && pastPaperDriveUrl.trim().length > 0;
+
+  const handleSavePastPaper = async () => {
+    if (!isPastPaperValid) return;
+    try {
+      const result = await addPastPaper({
+        title: pastPaperTitle.trim(),
+        driveUrl: pastPaperDriveUrl.trim(),
+        description: pastPaperDescription.trim(),
+        block: pastPaperBlock,
+        subjectId: pastPaperSubjectId,
+        status: (pastPaperPublishImmediately ? "published" : "draft") as QuestionStatus,
+      });
+      if (result.source === "firestore") {
+        setPastPaperSaveStatus("success");
+        setPastPaperSaveWarning(null);
+        setTimeout(() => setPastPaperSaveStatus(null), 3000);
+      } else {
+        setPastPaperSaveStatus("success-local");
+        setPastPaperSaveWarning(result.message);
+        setTimeout(() => setPastPaperSaveStatus(null), 9000);
+      }
+      setPastPaperTitle("");
+      setPastPaperDriveUrl("");
+      setPastPaperDescription("");
+    } catch {
+      setPastPaperSaveStatus("error");
+      setPastPaperSaveWarning(null);
+      setTimeout(() => setPastPaperSaveStatus(null), 4000);
+    }
+  };
+
+  const handleDeletePastPaper = async (p: FirestorePastPaper) => {
+    try {
+      await deletePastPaper(p.id);
+      setActionNotice(`Removed Past Paper: "${p.title.slice(0, 40)}"`);
+      setTimeout(() => setActionNotice(null), 3500);
+    } catch {
+      setActionNotice("Failed to delete Past Paper.");
+      setTimeout(() => setActionNotice(null), 3000);
+    }
+  };
+
+  const handleTogglePastPaperStatus = async (p: FirestorePastPaper) => {
+    const nextStatus: QuestionStatus = p.status === "published" ? "draft" : "published";
+    try {
+      await updatePastPaperStatus(p.id, nextStatus);
+      setActionNotice(`Past Paper status set to ${nextStatus}.`);
+      setTimeout(() => setActionNotice(null), 2500);
+    } catch {
+      setActionNotice("Failed to update Past Paper status.");
+      setTimeout(() => setActionNotice(null), 2500);
+    }
+  };
+
+  const [pastPaperFilterBlock, setPastPaperFilterBlock] = useState<string>("all");
+  const [pastPaperFilterSubject, setPastPaperFilterSubject] = useState<string>("all");
+  const [pastPaperFilterStatus, setPastPaperFilterStatus] = useState<string>("all");
+  const [pastPaperSearchQuery, setPastPaperSearchQuery] = useState("");
+
+  const filteredPastPapers = useMemo(() => {
+    return pastPapers
+      .filter((p) => {
+        if (pastPaperFilterBlock !== "all" && p.block !== Number(pastPaperFilterBlock)) return false;
+        if (pastPaperFilterSubject !== "all" && p.subjectId !== pastPaperFilterSubject) return false;
+        if (pastPaperFilterStatus !== "all" && p.status !== pastPaperFilterStatus) return false;
+        if (pastPaperSearchQuery.trim()) {
+          const query = pastPaperSearchQuery.toLowerCase();
+          const inTitle = p.title.toLowerCase().includes(query);
+          const inDesc = p.description?.toLowerCase().includes(query);
+          if (!inTitle && !inDesc) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [pastPapers, pastPaperFilterBlock, pastPaperFilterSubject, pastPaperFilterStatus, pastPaperSearchQuery]);
+
+  /* ------------------------------------------------------------------------- */
   /* BOOKS & STUDY NOTES STATE (Block -> Module -> Subject scoped, like        */
   /* Lectures — a Google Drive link per book/note)                            */
   /* ------------------------------------------------------------------------- */
@@ -1074,6 +1196,95 @@ export default function AdminPanel() {
     }
   };
 
+  // Keep the selection in sync with what's actually listed.
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const visible = new Set(filteredQuestions.map((q) => q.id));
+    const pruned = Array.from(selectedIds).filter((id) => visible.has(id));
+    if (pruned.length !== selectedIds.size) setSelectedIds(new Set(pruned));
+  }, [filteredQuestions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Long-press multi-select helpers ----
+  const selectionMode = selectedIds.size > 0;
+
+  const toggleSelected = (id: string) => {
+    setSelectedDeleteConfirm(false);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setSelectedDeleteConfirm(false);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    longPressStart.current = null;
+  };
+
+  const onCardPointerDown = (e: React.PointerEvent, qItem: FirestoreQuestion) => {
+    if (editingId === qItem.id) return;
+    // Ignore presses that start on interactive controls.
+    if ((e.target as HTMLElement).closest("button, a, input, textarea, select")) return;
+    longPressFired.current = false;
+    longPressStart.current = { x: e.clientX, y: e.clientY };
+    cancelLongPress();
+    longPressStart.current = { x: e.clientX, y: e.clientY };
+    longPressTimer.current = window.setTimeout(() => {
+      longPressFired.current = true;
+      longPressTimer.current = null;
+      if (navigator.vibrate) navigator.vibrate(30);
+      setDeleteConfirmId(null);
+      toggleSelected(qItem.id);
+    }, 500);
+  };
+
+  const onCardPointerMove = (e: React.PointerEvent) => {
+    const st = longPressStart.current;
+    if (!st) return;
+    if (Math.abs(e.clientX - st.x) > 10 || Math.abs(e.clientY - st.y) > 10) cancelLongPress();
+  };
+
+  const onCardClick = (e: React.MouseEvent, qItem: FirestoreQuestion) => {
+    if (longPressFired.current) {
+      // The click that follows a long press must not toggle again.
+      longPressFired.current = false;
+      return;
+    }
+    if (!selectionMode || editingId === qItem.id) return;
+    if ((e.target as HTMLElement).closest("button, a, input, textarea, select")) return;
+    toggleSelected(qItem.id);
+  };
+
+  const handleDeleteSelected = async () => {
+    const targets = allQuestions.filter((q) => selectedIds.has(q.id));
+    if (targets.length === 0) {
+      clearSelection();
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      await bulkDeleteQuestions(targets.map((q) => ({ id: q.id, q: q.q })));
+      setActionNotice(`Removed ${targets.length} MCQ${targets.length !== 1 ? "s" : ""}.`);
+      setTimeout(() => setActionNotice(null), 3500);
+      clearSelection();
+    } catch {
+      setActionNotice("Failed to delete selected questions.");
+      setTimeout(() => setActionNotice(null), 3000);
+    } finally {
+      setBulkDeleting(false);
+      setSelectedDeleteConfirm(false);
+    }
+  };
+
   // Open a question's card in inline edit mode, seeding the scratch fields
   // from its current values. Closes any other open edit / delete-confirm first.
   const handleStartEdit = (qItem: FirestoreQuestion) => {
@@ -1320,6 +1531,14 @@ export default function AdminPanel() {
                   style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
                 >
                   {studyNotes.length}
+                </span>
+              )}
+              {tab.id === "manage_past_paper" && (
+                <span
+                  className="rounded-full px-2 py-0.2 text-[11px] font-mono font-bold"
+                  style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : t.surface, color: active ? "#fff" : t.teal }}
+                >
+                  {pastPapers.length}
                 </span>
               )}
               {tab.id === "site_stats" && (
@@ -2125,6 +2344,65 @@ export default function AdminPanel() {
             </div>
           </div>
 
+          {/* Multi-select action bar (long-press an MCQ to start selecting) */}
+          {selectionMode && (
+            <div
+              className="sticky top-2 z-30 flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-3 shadow-lg"
+              style={{ backgroundColor: t.surface, border: `1.5px solid ${t.teal}` }}
+            >
+              <span className="text-sm font-extrabold" style={{ color: t.text }}>
+                {selectedIds.size} selected
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                {!selectedDeleteConfirm ? (
+                  <>
+                    <button
+                      onClick={() => setSelectedIds(new Set(filteredQuestions.map((q) => q.id)))}
+                      className="rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                      style={{ color: t.teal }}
+                    >
+                      Select all {filteredQuestions.length}
+                    </button>
+                    <button
+                      onClick={() => setSelectedDeleteConfirm(true)}
+                      className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-extrabold bg-red-600 text-white hover:bg-red-700"
+                    >
+                      <Trash2 size={13} /> Delete
+                    </button>
+                    <button
+                      onClick={clearSelection}
+                      className="rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                      style={{ color: t.textMuted }}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs font-bold text-red-400">
+                      Delete {selectedIds.size} MCQ{selectedIds.size !== 1 ? "s" : ""}? Can't be undone.
+                    </span>
+                    <button
+                      onClick={handleDeleteSelected}
+                      disabled={bulkDeleting}
+                      className="rounded-lg px-3 py-1.5 text-xs font-extrabold bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {bulkDeleting ? "Deleting\u2026" : "Yes, Delete"}
+                    </button>
+                    <button
+                      onClick={() => setSelectedDeleteConfirm(false)}
+                      disabled={bulkDeleting}
+                      className="rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                      style={{ color: t.textMuted }}
+                    >
+                      Back
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Questions List */}
           {!manageScopeReady ? (
             <div className="rounded-2xl p-12 text-center flex flex-col items-center gap-3" style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
@@ -2152,13 +2430,41 @@ export default function AdminPanel() {
                 const subjectMeta = SUBJECT_META[qItem.subjectId as keyof typeof SUBJECT_META];
                 const isDeletePrompt = deleteConfirmId === qItem.id;
                 const isEditing = editingId === qItem.id;
+                const isSelected = selectedIds.has(qItem.id);
 
                 return (
                   <div
                     key={qItem.id || idx}
                     className="rounded-2xl p-5 transition-all flex flex-col gap-3 relative"
-                    style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+                    style={{
+                      backgroundColor: isSelected ? `${t.teal}14` : t.surface,
+                      border: `1.5px solid ${isSelected ? t.teal : t.border}`,
+                      WebkitTouchCallout: "none",
+                      userSelect: selectionMode ? "none" : undefined,
+                      cursor: selectionMode ? "pointer" : undefined,
+                    }}
+                    onPointerDown={(e) => onCardPointerDown(e, qItem)}
+                    onPointerMove={onCardPointerMove}
+                    onPointerUp={cancelLongPress}
+                    onPointerCancel={cancelLongPress}
+                    onPointerLeave={cancelLongPress}
+                    onClick={(e) => onCardClick(e, qItem)}
+                    onContextMenu={(e) => {
+                      if (longPressFired.current || selectionMode) e.preventDefault();
+                    }}
                   >
+                    {selectionMode && (
+                      <div
+                        className="absolute top-3 right-3 flex h-6 w-6 items-center justify-center rounded-full pointer-events-none"
+                        style={{
+                          backgroundColor: isSelected ? t.teal : "transparent",
+                          border: `2px solid ${isSelected ? t.teal : t.textFaint}`,
+                          zIndex: 1,
+                        }}
+                      >
+                        {isSelected && <Check size={14} color="#fff" />}
+                      </div>
+                    )}
                     {/* Top Meta Bar */}
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3" style={{ borderColor: t.border }}>
                       <div className="flex flex-wrap items-center gap-2">
@@ -3461,6 +3767,293 @@ export default function AdminPanel() {
                       className="flex h-9 w-9 items-center justify-center rounded-xl"
                       style={{ backgroundColor: `${t.red}15`, border: `1.5px solid ${t.red}40` }}
                       title="Delete Study Note"
+                    >
+                      <Trash2 size={15} color={t.red} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB: ADD PAST PAPER (Block + Subject scoped, no Module/Topic)          */}
+      {/* ===================================================================== */}
+      {activeTab === "add_past_paper" && (
+        <div className="flex flex-col gap-6">
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-center justify-between border-b pb-3 mb-4" style={{ borderColor: t.border }}>
+              <div className="flex items-center gap-2">
+                <FileStack size={17} color={t.purple} />
+                <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
+                  Target Assignment (Block + Subject)
+                </span>
+              </div>
+              <span className="text-xs" style={{ color: t.textFaint }}>
+                Past Papers are scoped to Block &rarr; Subject only
+              </span>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Target Block
+                </label>
+                <select
+                  value={pastPaperBlock}
+                  onChange={(e) => setPastPaperBlock(Number(e.target.value))}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1).map((b) => (
+                    <option key={b} value={b} style={{ backgroundColor: t.surface, color: t.text }}>
+                      Block {b}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Discipline / Subject
+                </label>
+                <select
+                  value={pastPaperSubjectId}
+                  onChange={(e) => setPastPaperSubjectId(e.target.value as SubjectId)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  {SUBJECT_LIST.map((s) => (
+                    <option key={s} value={s} style={{ backgroundColor: t.surface, color: t.text }}>
+                      {SUBJECT_META[s].label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Target Summary Pill */}
+            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt }}>
+              <span className="font-bold" style={{ color: t.textMuted }}>Adding to:</span>
+              <Pill t={t} tone="teal">Block {pastPaperBlock}</Pill>
+              <Pill t={t} tone="gold">{SUBJECT_META[pastPaperSubjectId].label}</Pill>
+            </div>
+          </Card>
+
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex items-center gap-2 border-b pb-3 mb-4" style={{ borderColor: t.border }}>
+              <FileStack size={17} color={t.purple} />
+              <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>Past Paper Details</span>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Paper Title
+                </label>
+                <input
+                  type="text"
+                  value={pastPaperTitle}
+                  onChange={(e) => setPastPaperTitle(e.target.value)}
+                  placeholder="e.g. Block 3 Final Term Paper 2024"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Google Drive Link
+                </label>
+                <input
+                  type="text"
+                  value={pastPaperDriveUrl}
+                  onChange={(e) => setPastPaperDriveUrl(e.target.value)}
+                  placeholder="https://drive.google.com/file/d/.../view?usp=sharing"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+                <span className="mt-1 block text-[11px]" style={{ color: t.textFaint }}>
+                  Set the file's sharing to "Anyone with the link" in Google Drive so students can open it.
+                </span>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Description (optional)
+                </label>
+                <textarea
+                  value={pastPaperDescription}
+                  onChange={(e) => setPastPaperDescription(e.target.value)}
+                  placeholder="e.g. Annual exam, 2024 — with marking scheme"
+                  rows={3}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm outline-none resize-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs font-bold cursor-pointer" style={{ color: t.textMuted }}>
+                <input
+                  type="checkbox"
+                  checked={pastPaperPublishImmediately}
+                  onChange={(e) => setPastPaperPublishImmediately(e.target.checked)}
+                  className="accent-purple-500 rounded"
+                />
+                Publish immediately (Live)
+              </label>
+
+              {pastPaperSaveStatus === "success" && (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.green}20`, color: t.green }}>
+                  <CheckCircle2 size={16} /> Past Paper saved to Firestore!
+                </div>
+              )}
+              {pastPaperSaveStatus === "success-local" && (
+                <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold" style={{ backgroundColor: `${t.gold}20`, color: t.gold }}>
+                  <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                  <span>{pastPaperSaveWarning}</span>
+                </div>
+              )}
+              {pastPaperSaveStatus === "error" && (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold" style={{ backgroundColor: `${t.red}20`, color: t.red }}>
+                  <XCircle size={16} /> Failed to save Past Paper. Try again.
+                </div>
+              )}
+
+              <Btn t={t} disabled={!isPastPaperValid} onClick={handleSavePastPaper}>
+                Save Past Paper
+              </Btn>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB: MANAGE PAST PAPERS                                                */}
+      {/* ===================================================================== */}
+      {activeTab === "manage_past_paper" && (
+        <div className="flex flex-col gap-5">
+          {pastPaperBankWarning && (
+            <div className="flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold" style={{ backgroundColor: `${t.gold}20`, color: t.gold }}>
+              <AlertTriangle size={15} className="shrink-0 mt-0.5" /> <span>{pastPaperBankWarning}</span>
+            </div>
+          )}
+
+          {/* Filters */}
+          <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+            <div className="flex flex-col gap-3">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" color={t.textFaint} />
+                <input
+                  type="text"
+                  value={pastPaperSearchQuery}
+                  onChange={(e) => setPastPaperSearchQuery(e.target.value)}
+                  placeholder="Search Past Papers by title or description..."
+                  className="w-full rounded-xl py-2.5 pl-9 pr-3 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={pastPaperFilterBlock}
+                  onChange={(e) => setPastPaperFilterBlock(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Blocks</option>
+                  {Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1).map((b) => (
+                    <option key={b} value={b}>Block {b}</option>
+                  ))}
+                </select>
+                <select
+                  value={pastPaperFilterSubject}
+                  onChange={(e) => setPastPaperFilterSubject(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Subjects</option>
+                  {SUBJECT_LIST.map((s) => (
+                    <option key={s} value={s}>{SUBJECT_META[s].label}</option>
+                  ))}
+                </select>
+                <select
+                  value={pastPaperFilterStatus}
+                  onChange={(e) => setPastPaperFilterStatus(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="published">Published</option>
+                  <option value="draft">Draft</option>
+                </select>
+              </div>
+            </div>
+          </Card>
+
+          {loadingPastPapers ? (
+            <div className="flex items-center justify-center py-16">
+              <Spinner t={t} size={22} label="Loading Past Papers\u2026" />
+            </div>
+          ) : filteredPastPapers.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center gap-2 rounded-2xl p-10 text-center"
+              style={{ backgroundColor: t.surfaceAlt, border: `1.5px dashed ${t.border}` }}
+            >
+              <Archive size={22} color={t.textFaint} />
+              <p className="text-sm font-semibold" style={{ color: t.textMuted }}>No Past Papers match these filters.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {filteredPastPapers.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                      <Pill t={t} tone="teal">Block {p.block}</Pill>
+                      <Pill t={t} tone="gold">{SUBJECT_META[p.subjectId as SubjectId]?.label || p.subjectId}</Pill>
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                        style={{
+                          backgroundColor: p.status === "published" ? `${t.green}20` : `${t.textFaint}20`,
+                          color: p.status === "published" ? t.green : t.textFaint,
+                        }}
+                      >
+                        {p.status === "published" ? "Published" : "Draft"}
+                      </span>
+                    </div>
+                    <h4 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>{p.title}</h4>
+                    {p.description && (
+                      <p className="mt-0.5 text-xs" style={{ color: t.textMuted }}>{p.description}</p>
+                    )}
+                    <a
+                      href={p.driveUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 flex w-fit items-center gap-1 text-[11px] font-bold hover:opacity-80"
+                      style={{ color: t.teal }}
+                    >
+                      Open in Google Drive <ExternalLink size={11} />
+                    </a>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      onClick={() => handleTogglePastPaperStatus(p)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl"
+                      style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
+                      title={p.status === "published" ? "Unpublish" : "Publish"}
+                    >
+                      {p.status === "published" ? <EyeOff size={15} color={t.textMuted} /> : <Eye size={15} color={t.green} />}
+                    </button>
+                    <button
+                      onClick={() => handleDeletePastPaper(p)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl"
+                      style={{ backgroundColor: `${t.red}15`, border: `1.5px solid ${t.red}40` }}
+                      title="Delete Past Paper"
                     >
                       <Trash2 size={15} color={t.red} />
                     </button>

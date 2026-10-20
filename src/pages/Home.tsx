@@ -24,6 +24,7 @@ import {
   ShoppingBag,
   Crown,
   ClipboardList,
+  FileStack,
 } from "lucide-react";
 import Pill from "../components/Pill";
 import Card from "../components/Card";
@@ -67,6 +68,7 @@ const QUICK_LINKS = [
   { icon: Video, label: "Lectures", desc: "Watch topic videos", to: "/lectures", tone: "purple" },
   { icon: BookMarked, label: "OSPE Material", desc: "Subject reference guides", to: "/ospe-books", tone: "gold" },
   { icon: NotebookText, label: "Books & Study Notes", desc: "Block-wise notes & books", to: "/study-notes", tone: "teal" },
+  { icon: FileStack, label: "Past Papers", desc: "Previous exam papers by Block", to: "/past-papers", tone: "gold" },
   { icon: ShoppingBag, label: "Shop", desc: "Merch & study essentials", to: "/shop", tone: "green" },
 ];
 

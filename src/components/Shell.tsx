@@ -20,6 +20,7 @@ import {
   BookMarked,
   NotebookText,
   ClipboardList,
+  FileStack,
 } from "lucide-react";
 import Logomark from "./Logomark";
 import Footer from "./Footer";
@@ -42,6 +43,7 @@ const SECONDARY_NAV_ITEMS = [
   { to: "/lectures", label: "Lectures", icon: Video },
   { to: "/ospe-books", label: "OSPE Material", icon: BookMarked },
   { to: "/study-notes", label: "Books & Study Notes", icon: NotebookText },
+  { to: "/past-papers", label: "Past Papers", icon: FileStack },
   { to: "/shop", label: "Shop", icon: ShoppingBag },
 ];
 
