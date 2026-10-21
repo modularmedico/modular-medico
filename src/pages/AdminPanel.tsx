@@ -1196,14 +1196,6 @@ export default function AdminPanel() {
     }
   };
 
-  // Keep the selection in sync with what's actually listed.
-  useEffect(() => {
-    if (selectedIds.size === 0) return;
-    const visible = new Set(filteredQuestions.map((q) => q.id));
-    const pruned = Array.from(selectedIds).filter((id) => visible.has(id));
-    if (pruned.length !== selectedIds.size) setSelectedIds(new Set(pruned));
-  }, [filteredQuestions]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // ---- Long-press multi-select helpers ----
   const selectionMode = selectedIds.size > 0;
 
@@ -1426,6 +1418,14 @@ export default function AdminPanel() {
       return true;
     });
   }, [allQuestions, filterBlock, filterSubject, filterDifficulty, filterStatus, filterTopic, searchQuery]);
+
+  // Keep the selection in sync with what's actually listed.
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const visible = new Set(filteredQuestions.map((q) => q.id));
+    const pruned = Array.from(selectedIds).filter((id) => visible.has(id));
+    if (pruned.length !== selectedIds.size) setSelectedIds(new Set(pruned));
+  }, [filteredQuestions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Any change to the active filters invalidates a pending bulk-delete confirmation,
   // so the count shown in the confirm prompt always matches what's on screen.
