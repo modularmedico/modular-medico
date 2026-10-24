@@ -32,7 +32,7 @@ export default function WhatsAppCTA({ compact = false }: Props) {
             Need Guidance?
           </h3>
           <p className="mt-0.5 text-xs" style={{ color: t.textMuted }}>
-            Join our WhatsApp Group and Channel &mdash; follow the Modular Medico &#127973;&#129502; channel on WhatsApp.
+            Join our WhatsApp Group and Channel &mdash; follow the UHS Past MCQs &#127973;&#129502; channel on WhatsApp.
           </p>
         </div>
       </div>

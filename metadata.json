@@ -1,5 +1,5 @@
 {
-  "name": "Modular Medico",
+  "name": "UHS Past MCQs",
   "description": "MBBS MCQ practice application organized by subject and module, with spaced repetition, test modes, and performance analytics.",
   "requestFramePermissions": [],
   "majorCapabilities": [

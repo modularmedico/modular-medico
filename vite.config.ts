@@ -21,8 +21,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'Modular Medico',
-        short_name: 'Medico',
+        name: 'UHS Past MCQs',
+        short_name: 'UHS MCQs',
         description: 'MBBS MCQ Practice App',
         theme_color: '#8A5CFF',
         background_color: '#F4F2FA',

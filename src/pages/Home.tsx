@@ -99,8 +99,8 @@ const QUICK_LINKS = [
 
 const FAQS = [
   {
-    q: "How does the modular MBBS block system work in Modular Medico?",
-    a: "Instead of isolating subjects, Modular Medico organizes questions by integrated clinical blocks (Blocks 1–15) and organ systems (Cardiovascular, Respiratory, Neurosciences, etc.), combining Anatomy, Physiology, Biochemistry, and Pathology seamlessly.",
+    q: "How does the modular MBBS block system work in UHS Past MCQs?",
+    a: "Instead of isolating subjects, UHS Past MCQs organizes questions by integrated clinical blocks (Blocks 1–15) and organ systems (Cardiovascular, Respiratory, Neurosciences, etc.), combining Anatomy, Physiology, Biochemistry, and Pathology seamlessly.",
   },
   {
     q: "What is the difference between Traditional, OMR, and Mock Exam modes?",
@@ -138,7 +138,7 @@ export default function Home() {
           </span>
           <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 24, marginTop: 4 }}>Choose your section</h2>
         </div>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-3 gap-2 sm:gap-4">
           {MAIN_BOXES.map((box) => {
             const color = box.tone === "teal" ? t.teal : box.tone === "purple" ? t.purple : t.gold;
             return (
@@ -146,21 +146,29 @@ export default function Home() {
                 key={box.to}
                 t={t}
                 onClick={() => navigate(box.to)}
-                className="flex flex-col gap-4 p-6 transition-all hover:scale-[1.02]"
+                className="flex flex-col gap-1.5 p-2.5 transition-all hover:scale-[1.02] sm:gap-4 sm:p-6"
                 style={{ backgroundColor: t.surface, border: `1.5px solid ${color}66` }}
               >
                 <div
-                  className="flex h-14 w-14 items-center justify-center rounded-2xl"
+                  className="flex h-8 w-8 items-center justify-center rounded-xl sm:h-14 sm:w-14 sm:rounded-2xl"
                   style={{ backgroundColor: `${color}22` }}
                 >
-                  <box.icon size={26} color={color} />
+                  <box.icon size={16} color={color} className="sm:hidden" />
+                  <box.icon size={26} color={color} className="hidden sm:block" />
                 </div>
                 <div>
-                  <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 20 }}>{box.title}</div>
-                  <div style={{ color: t.textMuted, fontSize: 13.5, marginTop: 4, lineHeight: 1.5 }}>{box.desc}</div>
+                  <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700 }} className="text-[12px] leading-tight sm:text-[20px]">
+                    {box.title}
+                  </div>
+                  <div
+                    style={{ color: t.textMuted, lineHeight: 1.4 }}
+                    className="mt-1 hidden text-[13.5px] sm:block"
+                  >
+                    {box.desc}
+                  </div>
                 </div>
-                <div className="mt-auto flex items-center gap-1.5 text-sm font-bold" style={{ color }}>
-                  Open <ArrowRight size={15} />
+                <div className="mt-auto flex items-center gap-1 text-[11px] font-bold sm:gap-1.5 sm:text-sm" style={{ color }}>
+                  Open <ArrowRight size={12} className="sm:hidden" /> <ArrowRight size={15} className="hidden sm:block" />
                 </div>
               </Card>
             );
@@ -314,7 +322,7 @@ export default function Home() {
             Engineered for Precision
           </span>
           <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 24, marginTop: 4 }}>
-            Why medical students choose Modular Medico
+            Why medical students choose UHS Past MCQs
           </h2>
         </div>
 

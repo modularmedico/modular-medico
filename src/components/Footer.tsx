@@ -28,7 +28,7 @@ export default function Footer() {
             <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => navigate("/")}>
               <Logomark size={30} color={t.purple} />
               <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 20 }}>
-                Modular <span style={{ color: t.teal }}>Medico</span>
+                UHS <span style={{ color: t.teal }}>Past MCQs</span>
               </span>
             </div>
             <p className="text-xs leading-relaxed" style={{ color: t.textMuted }}>
@@ -113,10 +113,10 @@ export default function Footer() {
               Medical Disclaimer
             </span>
             <p className="text-[11px] leading-relaxed" style={{ color: t.textFaint }}>
-              Modular Medico is intended solely as an educational study aid for medical undergraduates preparing for university and licensure examinations. Content is not intended for clinical diagnostic or treatment decisions.
+              UHS Past MCQs is intended solely as an educational study aid for medical undergraduates preparing for university and licensure examinations. Content is not intended for clinical diagnostic or treatment decisions.
             </p>
             <div className="mt-2 text-[11px] font-bold" style={{ color: t.textMuted }}>
-              &copy; {new Date().getFullYear()} Modular Medico. All rights reserved.
+              &copy; {new Date().getFullYear()} UHS Past MCQs. All rights reserved.
             </div>
           </div>
         </div>

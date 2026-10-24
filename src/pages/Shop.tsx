@@ -20,7 +20,7 @@ export default function Shop() {
           Shop
         </h1>
         <p style={{ color: t.textMuted, fontSize: 13.5, marginTop: 2 }}>
-          Notes, guides, and study materials curated by Modular Medico.
+          Notes, guides, and study materials curated by UHS Past MCQs.
         </p>
       </div>
 
