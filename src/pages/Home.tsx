@@ -83,7 +83,7 @@ const MAIN_BOXES = [
   },
   {
     icon: FileStack,
-    title: "UHS Past Papers",
+    title: "UHS Past MCQs",
     desc: "Previous UHS exam papers, organized Block by Block.",
     to: "/browse/papers",
     tone: "gold",
@@ -99,8 +99,8 @@ const QUICK_LINKS = [
 
 const FAQS = [
   {
-    q: "How does the modular MBBS block system work in UHS Past MCQs?",
-    a: "Instead of isolating subjects, UHS Past MCQs organizes questions by integrated clinical blocks (Blocks 1–15) and organ systems (Cardiovascular, Respiratory, Neurosciences, etc.), combining Anatomy, Physiology, Biochemistry, and Pathology seamlessly.",
+    q: "How does the modular MBBS block system work in Modular Medico?",
+    a: "Instead of isolating subjects, Modular Medico organizes questions by integrated clinical blocks (Blocks 1–15) and organ systems (Cardiovascular, Respiratory, Neurosciences, etc.), combining Anatomy, Physiology, Biochemistry, and Pathology seamlessly.",
   },
   {
     q: "What is the difference between Traditional, OMR, and Mock Exam modes?",
@@ -322,7 +322,7 @@ export default function Home() {
             Engineered for Precision
           </span>
           <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 24, marginTop: 4 }}>
-            Why medical students choose UHS Past MCQs
+            Why medical students choose Modular Medico
           </h2>
         </div>
 

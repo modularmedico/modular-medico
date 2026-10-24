@@ -163,7 +163,7 @@ export default function Shell() {
           <button className="flex items-center gap-2.5" onClick={() => navigate("/")}>
             <Logomark size={28} color={t.purple} />
             <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 19, letterSpacing: "-0.02em" }}>
-              UHS <span style={{ color: t.teal }}>Past MCQs</span>
+              Modular <span style={{ color: t.teal }}>Medico</span>
             </span>
           </button>
         </div>
@@ -329,7 +329,7 @@ export default function Shell() {
                   <div className="flex items-center gap-2">
                     <Logomark size={24} color={t.purple} />
                     <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
-                      UHS <span style={{ color: t.teal }}>Past MCQs</span>
+                      Modular <span style={{ color: t.teal }}>Medico</span>
                     </span>
                   </div>
                   <button

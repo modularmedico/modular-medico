@@ -14,7 +14,7 @@ export default function Logomark({ size = 28, color = "#018ABE", className = "" 
     return (
       <img
         src={candidates[imgSrcIdx]}
-        alt="UHS Past MCQs Logo"
+        alt="Modular Medico Logo"
         width={size}
         height={size}
         className={`rounded-lg object-contain ${className}`}

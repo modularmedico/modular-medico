@@ -96,7 +96,7 @@ export default function Paywall() {
 
   const handleActivateSubscription = () => {
     const messageLines = [
-      "Hi! I'd like to get Blocks 1, 2 & 3 on UHS Past MCQs for PKR 499.",
+      "Hi! I'd like to get Blocks 1, 2 & 3 on Modular Medico for PKR 499.",
       email ? `My account email: ${email}` : null,
     ].filter(Boolean);
     const waUrl = `https://wa.me/${PURCHASE_WHATSAPP_NUMBER}?text=${encodeURIComponent(messageLines.join("\n"))}`;
