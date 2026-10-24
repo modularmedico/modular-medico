@@ -798,6 +798,8 @@ export default function AdminPanel() {
 
   const [pastPaperBlock, setPastPaperBlock] = useState<number>(1);
   const [pastPaperSubjectId, setPastPaperSubjectId] = useState<SubjectId>("gross_anatomy");
+  const [pastPaperModuleName, setPastPaperModuleName] = useState<string>("");
+  const [pastPaperTopicName, setPastPaperTopicName] = useState<string>("");
   const [pastPaperTitle, setPastPaperTitle] = useState("");
   const [pastPaperDriveUrl, setPastPaperDriveUrl] = useState("");
   const [pastPaperDescription, setPastPaperDescription] = useState("");
@@ -815,7 +817,9 @@ export default function AdminPanel() {
         driveUrl: pastPaperDriveUrl.trim(),
         description: pastPaperDescription.trim(),
         block: pastPaperBlock,
+        moduleName: pastPaperModuleName.trim(),
         subjectId: pastPaperSubjectId,
+        topicName: pastPaperTopicName.trim(),
         status: (pastPaperPublishImmediately ? "published" : "draft") as QuestionStatus,
       });
       if (result.source === "firestore") {
@@ -3792,7 +3796,7 @@ export default function AdminPanel() {
                 </span>
               </div>
               <span className="text-xs" style={{ color: t.textFaint }}>
-                Past Papers are scoped to Block &rarr; Subject only
+                Block &rarr; Module &rarr; Subject &rarr; Subheading (module &amp; subheading optional)
               </span>
             </div>
 
@@ -3832,13 +3836,50 @@ export default function AdminPanel() {
                   ))}
                 </select>
               </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Module (optional)
+                </label>
+                <select
+                  value={pastPaperModuleName}
+                  onChange={(e) => setPastPaperModuleName(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                >
+                  <option value="" style={{ backgroundColor: t.surface, color: t.text }}>
+                    General (no module)
+                  </option>
+                  {MASTER_MODULES.map((m) => (
+                    <option key={m.id} value={m.name} style={{ backgroundColor: t.surface, color: t.text }}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  Subheading (optional)
+                </label>
+                <input
+                  type="text"
+                  value={pastPaperTopicName}
+                  onChange={(e) => setPastPaperTopicName(e.target.value)}
+                  placeholder="e.g. Heart — leave empty for General"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                />
+              </div>
             </div>
 
             {/* Target Summary Pill */}
             <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt }}>
               <span className="font-bold" style={{ color: t.textMuted }}>Adding to:</span>
               <Pill t={t} tone="teal">Block {pastPaperBlock}</Pill>
+              {pastPaperModuleName && <Pill t={t} tone="purple">{pastPaperModuleName}</Pill>}
               <Pill t={t} tone="gold">{SUBJECT_META[pastPaperSubjectId].label}</Pill>
+              {pastPaperTopicName.trim() && <Pill t={t} tone="green">{pastPaperTopicName.trim()}</Pill>}
             </div>
           </Card>
 

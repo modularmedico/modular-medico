@@ -64,11 +64,36 @@ const FEATURES = [
   },
 ];
 
+// The three entry points on the first page. Each opens the same drill-down:
+// Blocks -> Modules -> Subjects -> Subheadings (see pages/HubBrowse.tsx).
+const MAIN_BOXES = [
+  {
+    icon: BookOpen,
+    title: "Practice MCQs",
+    desc: "Block-wise MCQ banks with instant explanations, OMR & timed modes.",
+    to: "/browse/mcqs",
+    tone: "teal",
+  },
+  {
+    icon: ClipboardList,
+    title: "Test Sessions",
+    desc: "Timed, exam-style tests curated by our faculty. See where you stand.",
+    to: "/browse/tests",
+    tone: "purple",
+  },
+  {
+    icon: FileStack,
+    title: "UHS Past Papers",
+    desc: "Previous UHS exam papers, organized Block by Block.",
+    to: "/browse/papers",
+    tone: "gold",
+  },
+];
+
 const QUICK_LINKS = [
   { icon: Video, label: "Lectures", desc: "Watch topic videos", to: "/lectures", tone: "purple" },
   { icon: BookMarked, label: "OSPE Material", desc: "Subject reference guides", to: "/ospe-books", tone: "gold" },
   { icon: NotebookText, label: "Books & Study Notes", desc: "Block-wise notes & books", to: "/study-notes", tone: "teal" },
-  { icon: FileStack, label: "Past Papers", desc: "Previous exam papers by Block", to: "/past-papers", tone: "gold" },
   { icon: ShoppingBag, label: "Shop", desc: "Merch & study essentials", to: "/shop", tone: "green" },
 ];
 
@@ -105,6 +130,44 @@ export default function Home() {
 
   return (
     <div className="flex flex-col gap-16 pb-8">
+      {/* First thing students see: the 3 main boxes */}
+      <section className="flex flex-col gap-4">
+        <div>
+          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: t.teal }}>
+            Where do you want to start?
+          </span>
+          <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 24, marginTop: 4 }}>Choose your section</h2>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {MAIN_BOXES.map((box) => {
+            const color = box.tone === "teal" ? t.teal : box.tone === "purple" ? t.purple : t.gold;
+            return (
+              <Card
+                key={box.to}
+                t={t}
+                onClick={() => navigate(box.to)}
+                className="flex flex-col gap-4 p-6 transition-all hover:scale-[1.02]"
+                style={{ backgroundColor: t.surface, border: `1.5px solid ${color}66` }}
+              >
+                <div
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl"
+                  style={{ backgroundColor: `${color}22` }}
+                >
+                  <box.icon size={26} color={color} />
+                </div>
+                <div>
+                  <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 20 }}>{box.title}</div>
+                  <div style={{ color: t.textMuted, fontSize: 13.5, marginTop: 4, lineHeight: 1.5 }}>{box.desc}</div>
+                </div>
+                <div className="mt-auto flex items-center gap-1.5 text-sm font-bold" style={{ color }}>
+                  Open <ArrowRight size={15} />
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      </section>
+
       {/* Hero Section */}
       <section
         className="relative overflow-hidden rounded-[32px] px-6 py-12 md:px-12 md:py-16 transition-all"
@@ -135,7 +198,7 @@ export default function Home() {
           </p>
 
           <div className="flex flex-wrap gap-3 pt-2">
-            <Btn t={t} icon={ArrowRight} onClick={() => navigate("/subjects")}>
+            <Btn t={t} icon={ArrowRight} onClick={() => navigate("/browse/mcqs")}>
               {START_PRACTICE_CTA}
             </Btn>
             <Btn t={t} variant="ghost" onClick={() => navigate(isLoggedIn ? "/builder" : "/login")}>
@@ -159,36 +222,12 @@ export default function Home() {
               t={t}
               tone={t.chip[i % t.chip.length]}
               rotate={s.rotate}
-              onClick={() => navigate("/subjects")}
+              onClick={() => navigate("/browse/mcqs")}
             >
               {SUBJECT_META[s.id].label}
             </Pill>
           ))}
         </div>
-      </section>
-
-      {/* Test sessions banner */}
-      <section
-        className="flex flex-col items-start justify-between gap-4 rounded-3xl px-6 py-6 sm:flex-row sm:items-center md:px-8"
-        style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.teal}` }}
-      >
-        <div className="flex items-center gap-4">
-          <div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"
-            style={{ backgroundColor: `${t.teal}22` }}
-          >
-            <ClipboardList size={24} color={t.teal} />
-          </div>
-          <div>
-            <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 20 }}>Join our test sessions</div>
-            <div style={{ color: t.textMuted, fontSize: 13.5, marginTop: 2 }}>
-              Timed, exam-style tests curated by our faculty. Take one and see where you stand.
-            </div>
-          </div>
-        </div>
-        <Btn t={t} icon={ArrowRight} onClick={() => navigate("/tests")}>
-          Join a test
-        </Btn>
       </section>
 
       {/* Quick Links — Lectures, OSPE Material, Books & Study Notes, Shop */}
@@ -342,7 +381,7 @@ export default function Home() {
               </li>
             </ul>
           </div>
-          <Btn t={t} variant="ghost" full style={{ marginTop: 24 }} onClick={() => navigate("/subjects")}>
+          <Btn t={t} variant="ghost" full style={{ marginTop: 24 }} onClick={() => navigate("/browse/mcqs")}>
             Browse Free Sets
           </Btn>
         </Card>

@@ -10,9 +10,10 @@ import { cacheFirstSnapshot } from "../utils/localCache";
  * the signed-in account lacks the real Firestore admin claim (or while
  * offline) still shows up in this browser instead of silently vanishing.
  *
- * Unlike OSPE Material (Subject-only), each Past Paper is scoped to a
- * Block + Subject pair (no Module/Topic) — e.g. "Block 3 / Gross Anatomy /
- * Final Term 2024".
+ * Unlike OSPE Material (Subject-only), each Past Paper is scoped to
+ * Block -> Module -> Subject -> Subheading — e.g. "Block 3 / Cardiovascular-I /
+ * Gross Anatomy / Heart / Final Term 2024". Module and Subheading are optional
+ * (older papers don't have them and show under "General").
  */
 
 const LOCAL_PAST_PAPERS_KEY = "modular_medico_local_past_papers";
@@ -64,7 +65,9 @@ export interface PastPaperInput {
   driveUrl: string;
   description?: string;
   block: number;
+  moduleName?: string;
   subjectId: string;
+  topicName?: string;
   status?: QuestionStatus;
 }
 

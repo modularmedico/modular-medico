@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, FileStack, FolderTree, X, ExternalLink } from "lucide-react";
 import Spinner from "../components/Spinner";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import { SUBJECT_META, type SubjectId } from "../data/subjects";
+import { GENERAL_LABEL, GENERAL_KEY, matchesFilter, slugify } from "./hubShared";
 import { subscribePublishedPastPapers, toDrivePreviewUrl } from "../services/pastPapers";
 import type { FirestorePastPaper } from "../types";
 
@@ -13,6 +14,9 @@ export default function PastPaperSubject() {
   const navigate = useNavigate();
   const { block: blockParam = "", subjectId = "" } = useParams();
   const blockNum = Number(blockParam);
+  const [searchParams] = useSearchParams();
+  const fModule = searchParams.get("module") || undefined;
+  const fTopic = searchParams.get("topic") || undefined;
 
   const isDark = useAppStore((s) => s.isDark);
   const t = isDark ? THEME.dark : THEME.light;
@@ -30,8 +34,22 @@ export default function PastPaperSubject() {
   }, []);
 
   const papers = useMemo(
-    () => allPapers.filter((p) => p.block === blockNum && p.subjectId === subjectId),
-    [allPapers, blockNum, subjectId]
+    () =>
+      allPapers.filter(
+        (p) =>
+          p.block === blockNum &&
+          p.subjectId === subjectId &&
+          matchesFilter(
+            {
+              block: p.block,
+              moduleId: slugify((p.moduleName || "").trim() || GENERAL_LABEL),
+              subjectId: p.subjectId,
+              topic: (p.topicName || "").trim() || null,
+            },
+            { module: fModule, topic: fTopic }
+          )
+      ),
+    [allPapers, blockNum, subjectId, fModule, fTopic]
   );
 
   const meta = SUBJECT_META[subjectId as SubjectId] || { label: subjectId, tag: "" };
@@ -41,7 +59,7 @@ export default function PastPaperSubject() {
     return (
       <div className="py-16 text-center">
         <p style={{ color: t.textMuted }}>That subject couldn't be found.</p>
-        <button onClick={() => navigate("/past-papers")} className="mt-3 text-sm font-bold" style={{ color: t.teal }}>
+        <button onClick={() => navigate("/browse/papers")} className="mt-3 text-sm font-bold" style={{ color: t.teal }}>
           Back to Past Papers
         </button>
       </div>
@@ -51,11 +69,11 @@ export default function PastPaperSubject() {
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto">
       <button
-        onClick={() => navigate(`/past-papers/${blockNum}`)}
+        onClick={() => navigate(fModule ? `/browse/papers/${blockNum}/${fModule}/${subjectId}` : `/browse/papers/${blockNum}`)}
         className="flex items-center gap-1 text-sm font-bold self-start"
         style={{ color: t.textMuted }}
       >
-        <ChevronLeft size={15} /> Block {blockNum}
+        <ChevronLeft size={15} /> {fModule ? "Subheadings" : `Block ${blockNum}`}
       </button>
 
       <div>
@@ -68,6 +86,11 @@ export default function PastPaperSubject() {
         <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 24, marginTop: 8 }}>
           {meta.label} — Past Papers
         </h1>
+        {fTopic && (
+          <p style={{ color: t.textMuted, fontSize: 13.5, marginTop: 2 }}>
+            {fTopic === GENERAL_KEY ? GENERAL_LABEL : fTopic}
+          </p>
+        )}
       </div>
 
       {!loaded && (

@@ -154,7 +154,11 @@ export interface FirestorePastPaper {
   driveUrl: string;
   description?: string;
   block: number; // 1..15
+  /** Module name (e.g. "Cardiovascular-I"). Missing on older papers -> shown under "General". */
+  moduleName?: string;
   subjectId: string;
+  /** Subheading / topic inside the subject. Missing on older papers -> shown under "General". */
+  topicName?: string;
   status: QuestionStatus; // reuse "draft" | "published"
   order?: number;
   createdAt?: number;

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ClipboardList, Clock, HelpCircle, Play, Loader2, Lock, Unlock, Layers, BookOpen, Trophy, Timer } from "lucide-react";
+import { ChevronLeft, X, ClipboardList, Clock, HelpCircle, Play, Loader2, Lock, Unlock, Layers, BookOpen, Trophy, Timer } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
@@ -27,6 +27,7 @@ import {
   type Participant,
 } from "../services/testLeaderboard";
 import { SUBJECT_META, type SubjectId } from "../data/subjects";
+import { GENERAL_LABEL, GENERAL_KEY, matchesFilter, slugify, subjectLabel } from "./hubShared";
 import type { PracticeConfig, TestLeaderboardEntry, TestSessionDoc, TestSessionSource } from "../types";
 
 /** Unique (block, subjectId) pairs a test touches, de-duplicated and sorted for the badge row. */
@@ -62,6 +63,40 @@ export default function Tests() {
 
   const [tests, setTests] = useState<TestSessionDoc[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Filters coming from the Test Sessions drill-down (Block > Module > Subject > Subheading).
+  // /tests with no filters still lists every test, exactly as before.
+  const fBlock = searchParams.get("block");
+  const fModule = searchParams.get("module") || undefined;
+  const fSubject = searchParams.get("subject") || undefined;
+  const fTopic = searchParams.get("topic") || undefined;
+  const hasFilter = fBlock !== null;
+  const visibleTests = useMemo(() => {
+    if (!hasFilter) return tests;
+    const f = { block: Number(fBlock), module: fModule, subject: fSubject, topic: fTopic };
+    return tests.filter((test) =>
+      test.sources.some((src) =>
+        matchesFilter(
+          {
+            block: src.block,
+            moduleId: slugify((src.moduleName || "").trim() || GENERAL_LABEL),
+            subjectId: src.subjectId || "all",
+            topic: (src.topicName || "").trim() || null,
+          },
+          f
+        )
+      )
+    );
+  }, [tests, hasFilter, fBlock, fModule, fSubject, fTopic]);
+  // Keep the filter when flipping between the Tests and Leaderboard tabs.
+  const filterParams = () => {
+    const out: Record<string, string> = {};
+    ["block", "module", "subject", "topic"].forEach((k) => {
+      const v = searchParams.get(k);
+      if (v) out[k] = v;
+    });
+    return out;
+  };
 
   // The student's own attempts, used for the 2-hour retake cooldown.
   const [myEntries, setMyEntries] = useState<Record<string, TestLeaderboardEntry>>({});
@@ -207,17 +242,46 @@ export default function Tests() {
   };
 
   const setTab = (next: "tests" | "leaderboard") => {
-    if (next === "tests") setSearchParams({}, { replace: true });
-    else setSearchParams({ tab: "leaderboard" }, { replace: true });
+    if (next === "tests") setSearchParams(filterParams(), { replace: true });
+    else setSearchParams({ ...filterParams(), tab: "leaderboard" }, { replace: true });
   };
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
+      <button
+        onClick={() =>
+          navigate(
+            hasFilter && fModule && fSubject
+              ? `/browse/tests/${fBlock}/${fModule}/${fSubject}`
+              : "/browse/tests"
+          )
+        }
+        className="flex items-center gap-1 self-start text-sm font-bold"
+        style={{ color: t.textMuted }}
+      >
+        <ChevronLeft size={15} /> {hasFilter ? "Subheadings" : "Test Sessions"}
+      </button>
+
       <div>
         <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 26 }}>Test Sessions</h1>
         <p style={{ color: t.textMuted, fontSize: 14, marginTop: 2 }}>
           Timed exam-style tests curated by our faculty. Pick one and join in.
         </p>
+        {hasFilter && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <Pill t={t} tone="purple">Block {fBlock}</Pill>
+            {fModule && <Pill t={t} tone="teal">{fModule.replace(/-/g, " ")}</Pill>}
+            {fSubject && <Pill t={t} tone="gold">{subjectLabel(fSubject)}</Pill>}
+            {fTopic && <Pill t={t} tone="green">{fTopic === GENERAL_KEY ? GENERAL_LABEL : fTopic}</Pill>}
+            <button
+              onClick={() => setSearchParams({}, { replace: true })}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold"
+              style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}
+            >
+              <X size={11} /> Show all tests
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2">
@@ -264,10 +328,10 @@ export default function Tests() {
         <div className="flex items-center justify-center gap-2 py-16 text-sm" style={{ color: t.textMuted }}>
           <Loader2 size={16} className="animate-spin" /> Loading tests&hellip;
         </div>
-      ) : tests.length === 0 ? (
+      ) : visibleTests.length === 0 ? (
         <Card t={t} style={{ textAlign: "center", padding: 32 }}>
           <ClipboardList size={28} color={t.textFaint} style={{ margin: "0 auto 10px" }} />
-          <p style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 16 }}>No test sessions right now</p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 16 }}>{hasFilter ? "No tests in this subheading yet" : "No test sessions right now"}</p>
           <p style={{ color: t.textMuted, fontSize: 13, marginTop: 4 }}>
             New tests are posted regularly. Check back soon!
           </p>
@@ -276,7 +340,7 @@ export default function Tests() {
         // Mobile: single stacked column. Desktop (md+): multi-column grid so
         // more tests are visible without scrolling.
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {tests.map((test) => {
+          {visibleTests.map((test) => {
             const locked = isTestLocked(test);
             const paid = isPaidTest(test);
             const srcs = uniqueSources(test.sources);
@@ -364,7 +428,7 @@ export default function Tests() {
                       ({mine.scorePct}%)
                     </span>
                     <button
-                      onClick={() => setSearchParams({ tab: "leaderboard", test: test.id }, { replace: true })}
+                      onClick={() => setSearchParams({ ...filterParams(), tab: "leaderboard", test: test.id }, { replace: true })}
                       className="inline-flex items-center gap-1 font-bold"
                       style={{ color: t.gold }}
                     >

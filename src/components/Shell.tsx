@@ -31,8 +31,8 @@ import { logOut as firebaseLogOut } from "../services/auth";
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: HomeIcon, end: true },
-  { to: "/tests", label: "Test", icon: ClipboardList },
-  { to: "/subjects", label: "Practice", icon: BookOpen },
+  { to: "/browse/tests", label: "Test", icon: ClipboardList },
+  { to: "/browse/mcqs", label: "Practice", icon: BookOpen },
   { to: "/bookmarks", label: "Saved", icon: Bookmark },
   { to: "/profile", label: "Profile", icon: User },
 ];
@@ -43,7 +43,7 @@ const SECONDARY_NAV_ITEMS = [
   { to: "/lectures", label: "Lectures", icon: Video },
   { to: "/ospe-books", label: "OSPE Material", icon: BookMarked },
   { to: "/study-notes", label: "Books & Study Notes", icon: NotebookText },
-  { to: "/past-papers", label: "Past Papers", icon: FileStack },
+  { to: "/browse/papers", label: "Past Papers", icon: FileStack },
   { to: "/shop", label: "Shop", icon: ShoppingBag },
 ];
 
@@ -109,7 +109,16 @@ export default function Shell() {
     setMenuOpen(false);
   }, [location.pathname]);
 
-  const isActive = (to: string, end?: boolean) => (end ? location.pathname === to : location.pathname.startsWith(to));
+  // Pages reached from the drill-down (/tests, /subjects/..., /past-papers/...) keep their tab highlighted.
+  const NAV_ALIASES: Record<string, string[]> = {
+    "/browse/tests": ["/tests"],
+    "/browse/mcqs": ["/subjects", "/practice"],
+    "/browse/papers": ["/past-papers"],
+  };
+  const isActive = (to: string, end?: boolean) =>
+    end
+      ? location.pathname === to
+      : location.pathname.startsWith(to) || (NAV_ALIASES[to] ?? []).some((a) => location.pathname.startsWith(a));
 
   return (
     <div style={{ backgroundColor: t.bg, color: t.text, fontFamily: FONT_BODY, minHeight: "100vh", display: "flex", flexDirection: "column" }}>

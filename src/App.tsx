@@ -1,12 +1,12 @@
 import { useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import Shell from "./components/Shell";
 import AdminLayout from "./components/AdminLayout";
 import ScrollToTop from "./components/ScrollToTop";
 import Home from "./pages/Home";
 import Auth from "./pages/Auth";
 import Subjects from "./pages/Subjects";
-import BlockDetail from "./pages/BlockDetail";
+import HubBrowse from "./pages/HubBrowse";
 import SubjectDetail from "./pages/SubjectDetail";
 import PracticeSetup from "./pages/PracticeSetup";
 import Practice from "./pages/Practice";
@@ -19,8 +19,6 @@ import Profile from "./pages/Profile";
 import Lectures from "./pages/Lectures";
 import OspeBooks from "./pages/OspeBooks";
 import StudyNotes from "./pages/StudyNotes";
-import PastPapers from "./pages/PastPapers";
-import PastPaperBlock from "./pages/PastPaperBlock";
 import PastPaperSubject from "./pages/PastPaperSubject";
 import Shop from "./pages/Shop";
 import AdminGate from "./pages/AdminGate";
@@ -40,6 +38,12 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   const isAdmin = useAppStore((s) => s.isAdmin);
   if (!isAdmin) return <Navigate to="/admin-gate" replace />;
   return <>{children}</>;
+}
+
+// Old URLs keep working: they forward into the new Block > Module > Subject > Subheading flow.
+function RedirectToBrowse({ kind }: { kind: "mcqs" | "papers" }) {
+  const { block } = useParams();
+  return <Navigate to={`/browse/${kind}${block ? `/${block}` : ""}`} replace />;
 }
 
 export default function App() {
@@ -103,7 +107,11 @@ export default function App() {
           <Route path="/login" element={<Auth />} />
           <Route path="/signup" element={<Auth />} />
           <Route path="/subjects" element={<Subjects />} />
-          <Route path="/subjects/block/:block" element={<BlockDetail />} />
+          <Route path="/subjects/block/:block" element={<RedirectToBrowse kind="mcqs" />} />
+          <Route path="/browse/:kind" element={<HubBrowse />} />
+          <Route path="/browse/:kind/:block" element={<HubBrowse />} />
+          <Route path="/browse/:kind/:block/:moduleId" element={<HubBrowse />} />
+          <Route path="/browse/:kind/:block/:moduleId/:subjectId" element={<HubBrowse />} />
           <Route path="/subjects/:subjectId" element={<SubjectDetail />} />
           <Route path="/subjects/:subjectId/:moduleId/:block" element={<PracticeSetup />} />
           <Route path="/practice" element={<Practice />} />
@@ -116,8 +124,8 @@ export default function App() {
           <Route path="/lectures" element={<Lectures />} />
           <Route path="/ospe-books" element={<OspeBooks />} />
           <Route path="/study-notes" element={<StudyNotes />} />
-          <Route path="/past-papers" element={<PastPapers />} />
-          <Route path="/past-papers/:block" element={<PastPaperBlock />} />
+          <Route path="/past-papers" element={<RedirectToBrowse kind="papers" />} />
+          <Route path="/past-papers/:block" element={<RedirectToBrowse kind="papers" />} />
           <Route path="/past-papers/:block/:subjectId" element={<PastPaperSubject />} />
           <Route path="/shop" element={<Shop />} />
           <Route path="/paywall" element={<Paywall />} />

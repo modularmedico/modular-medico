@@ -140,7 +140,7 @@ export default function Subjects() {
       {/* Subject tab above, so it reads as its own top-level section.             */}
       {/* ========================================================================= */}
       <div
-        onClick={() => navigate("/past-papers")}
+        onClick={() => navigate("/browse/papers")}
         className="flex cursor-pointer items-center gap-4 rounded-[22px] p-5 transition-all hover:scale-[1.005]"
         style={{
           background: `linear-gradient(120deg, ${t.gold}26, ${t.purpleStrong}18)`,
@@ -206,7 +206,7 @@ export default function Subjects() {
               return (
                 <button
                   key={b.block}
-                  onClick={() => navigate(`/subjects/block/${b.block}`)}
+                  onClick={() => navigate(`/browse/mcqs/${b.block}`)}
                   className="flex flex-col items-center justify-center rounded-2xl p-2.5 transition-all text-center relative hover:scale-[1.02]"
                   style={{
                     backgroundColor: t.surfaceAlt,

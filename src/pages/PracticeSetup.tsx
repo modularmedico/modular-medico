@@ -187,6 +187,15 @@ export default function PracticeSetup() {
     return merged.sort((a, b) => a.order - b.order);
   })();
 
+  // Arriving from the Subheadings page (/browse/mcqs/...) with ?topic=Name — preselect it
+  // once the topic list has loaded (the scope-reset effect above clears it first).
+  const topicFromUrl = searchParams.get("topic");
+  useEffect(() => {
+    if (!topicFromUrl || !topicsLoaded) return;
+    if (topics.some((x) => x.name === topicFromUrl)) setSelectedTopicName(topicFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicFromUrl, topicsLoaded, topicDocs, topicNamesFromQuestions]);
+
   // Discover the distinct (subject, topic) pairs used across every published question in
   // this Module, so the whole-module "Practice Module" flow can offer the same narrowing the
   // per-subject flow already has, instead of always bundling every subject's MCQs together —
