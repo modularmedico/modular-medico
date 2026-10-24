@@ -148,10 +148,21 @@ export interface FirestoreStudyNote {
  * whole previous-exam PDFs (e.g. "Block 3 Final Term Paper 2024"), not tied
  * to a specific Module the way MCQs, Lectures, and Study Notes are.
  */
+/** One manually-entered MCQ attached to a Past Paper, same shape as the bracket-format parse result. */
+export interface PastPaperMCQItem {
+  q: string;
+  options: string[];
+  correct: number;
+  explanation?: string;
+}
+
 export interface FirestorePastPaper {
   id: string;
   title: string;
-  driveUrl: string;
+  /** Present when this paper was added as a Google Drive PDF link. */
+  driveUrl?: string;
+  /** Present when this paper's questions were typed in manually (bracket format) instead of linked. */
+  mcqs?: PastPaperMCQItem[];
   description?: string;
   block: number; // 1..15
   /** Module name (e.g. "Cardiovascular-I"). Missing on older papers -> shown under "General". */

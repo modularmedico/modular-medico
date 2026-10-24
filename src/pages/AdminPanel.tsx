@@ -40,6 +40,8 @@ import {
   HardDrive,
   FileStack,
   Archive,
+  Link2,
+  ListChecks,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Card from "../components/Card";
@@ -807,14 +809,42 @@ export default function AdminPanel() {
   const [pastPaperSaveStatus, setPastPaperSaveStatus] = useState<"success" | "success-local" | "error" | null>(null);
   const [pastPaperSaveWarning, setPastPaperSaveWarning] = useState<string | null>(null);
 
-  const isPastPaperValid = pastPaperTitle.trim().length > 0 && pastPaperDriveUrl.trim().length > 0;
+  // Input method for a Past Paper: a linked Google Drive PDF, or MCQs typed straight in
+  // using the same bracket format as the "Add MCQs" tab.
+  const [pastPaperInputMode, setPastPaperInputMode] = useState<"drive" | "mcqs">("drive");
+  const [pastPaperBracketText, setPastPaperBracketText] = useState("");
+
+  const parsedPastPaperMCQs = useMemo(() => {
+    return parseBracketFormat(pastPaperBracketText);
+  }, [pastPaperBracketText]);
+
+  const validPastPaperMCQs = useMemo(() => {
+    return parsedPastPaperMCQs.filter((p) => p.status !== "error" && p.q && p.options && p.correct !== undefined);
+  }, [parsedPastPaperMCQs]);
+
+  const errorPastPaperMCQs = useMemo(() => {
+    return parsedPastPaperMCQs.filter((p) => p.status === "error");
+  }, [parsedPastPaperMCQs]);
+
+  const isPastPaperValid =
+    pastPaperTitle.trim().length > 0 &&
+    (pastPaperInputMode === "drive" ? pastPaperDriveUrl.trim().length > 0 : validPastPaperMCQs.length > 0);
 
   const handleSavePastPaper = async () => {
     if (!isPastPaperValid) return;
     try {
       const result = await addPastPaper({
         title: pastPaperTitle.trim(),
-        driveUrl: pastPaperDriveUrl.trim(),
+        ...(pastPaperInputMode === "drive"
+          ? { driveUrl: pastPaperDriveUrl.trim() }
+          : {
+              mcqs: validPastPaperMCQs.map((v) => ({
+                q: v.q!,
+                options: v.options!,
+                correct: v.correct!,
+                explanation: v.explanation,
+              })),
+            }),
         description: pastPaperDescription.trim(),
         block: pastPaperBlock,
         moduleName: pastPaperModuleName.trim(),
@@ -834,6 +864,7 @@ export default function AdminPanel() {
       setPastPaperTitle("");
       setPastPaperDriveUrl("");
       setPastPaperDescription("");
+      setPastPaperBracketText("");
     } catch {
       setPastPaperSaveStatus("error");
       setPastPaperSaveWarning(null);
@@ -3883,6 +3914,34 @@ export default function AdminPanel() {
             </div>
           </Card>
 
+          {/* Input Method Switcher: Google Drive Link vs Manual MCQs (bracket format) */}
+          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: t.border }}>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPastPaperInputMode("drive")}
+                className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all"
+                style={{
+                  backgroundColor: pastPaperInputMode === "drive" ? t.purpleStrong : t.surfaceAlt,
+                  color: pastPaperInputMode === "drive" ? "#fff" : t.textMuted,
+                  border: `1.5px solid ${pastPaperInputMode === "drive" ? t.purpleStrong : t.border}`,
+                }}
+              >
+                <Link2 size={14} /> Google Drive Link
+              </button>
+              <button
+                onClick={() => setPastPaperInputMode("mcqs")}
+                className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all"
+                style={{
+                  backgroundColor: pastPaperInputMode === "mcqs" ? t.purpleStrong : t.surfaceAlt,
+                  color: pastPaperInputMode === "mcqs" ? "#fff" : t.textMuted,
+                  border: `1.5px solid ${pastPaperInputMode === "mcqs" ? t.purpleStrong : t.border}`,
+                }}
+              >
+                <ListChecks size={14} /> Manual MCQs
+              </button>
+            </div>
+          </div>
+
           <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
             <div className="flex items-center gap-2 border-b pb-3 mb-4" style={{ borderColor: t.border }}>
               <FileStack size={17} color={t.purple} />
@@ -3904,22 +3963,70 @@ export default function AdminPanel() {
                 />
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  Google Drive Link
-                </label>
-                <input
-                  type="text"
-                  value={pastPaperDriveUrl}
-                  onChange={(e) => setPastPaperDriveUrl(e.target.value)}
-                  placeholder="https://drive.google.com/file/d/.../view?usp=sharing"
-                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
-                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
-                />
-                <span className="mt-1 block text-[11px]" style={{ color: t.textFaint }}>
-                  Set the file's sharing to "Anyone with the link" in Google Drive so students can open it.
-                </span>
-              </div>
+              {pastPaperInputMode === "drive" ? (
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                    Google Drive Link
+                  </label>
+                  <input
+                    type="text"
+                    value={pastPaperDriveUrl}
+                    onChange={(e) => setPastPaperDriveUrl(e.target.value)}
+                    placeholder="https://drive.google.com/file/d/.../view?usp=sharing"
+                    className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                    style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  />
+                  <span className="mt-1 block text-[11px]" style={{ color: t.textFaint }}>
+                    Set the file's sharing to "Anyone with the link" in Google Drive so students can open it.
+                  </span>
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                      MCQs (Bracket Format)
+                    </label>
+                    <span className="text-[11px]" style={{ color: t.textMuted }}>
+                      Format: <code>[Question ; Opt A | Opt B | *Opt C | Opt D ; Explanation]</code>
+                    </span>
+                  </div>
+                  <textarea
+                    value={pastPaperBracketText}
+                    onChange={(e) => setPastPaperBracketText(e.target.value)}
+                    rows={10}
+                    placeholder={`Type or paste this paper's MCQs here...\n\nExample:\n[What is the major extracellular cation? ; Sodium* | Potassium | Calcium | Magnesium ; Sodium (Na+) is the principal cation of the extracellular fluid.]`}
+                    className="w-full rounded-2xl p-4 text-xs font-mono outline-none resize-y leading-relaxed"
+                    style={{
+                      backgroundColor: t.surfaceAlt,
+                      border: `1.5px solid ${t.border}`,
+                      color: t.text,
+                      minHeight: "220px",
+                    }}
+                  />
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-xs font-mono" style={{ color: t.textMuted }}>
+                      Parsed: <strong style={{ color: validPastPaperMCQs.length > 0 ? t.green : t.textFaint }}>{validPastPaperMCQs.length} valid</strong>
+                      {errorPastPaperMCQs.length > 0 && <span style={{ color: t.red }}> ({errorPastPaperMCQs.length} errors)</span>}
+                    </span>
+                  </div>
+                  {errorPastPaperMCQs.length > 0 && (
+                    <div className="mt-2 flex flex-col gap-1.5">
+                      {errorPastPaperMCQs.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="rounded-xl p-2.5 text-xs"
+                          style={{ backgroundColor: `${t.red}15`, border: `1px solid ${t.red}`, color: t.red }}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold mb-0.5">
+                            <AlertTriangle size={13} /> MCQ #{item.line}: Parse Error
+                          </div>
+                          <p>{item.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
@@ -3963,7 +4070,7 @@ export default function AdminPanel() {
               )}
 
               <Btn t={t} disabled={!isPastPaperValid} onClick={handleSavePastPaper}>
-                Save Past Paper
+                {pastPaperInputMode === "mcqs" ? `Save Past Paper (${validPastPaperMCQs.length} MCQs)` : "Save Past Paper"}
               </Btn>
             </div>
           </Card>
@@ -4070,15 +4177,24 @@ export default function AdminPanel() {
                     {p.description && (
                       <p className="mt-0.5 text-xs" style={{ color: t.textMuted }}>{p.description}</p>
                     )}
-                    <a
-                      href={p.driveUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-1 flex w-fit items-center gap-1 text-[11px] font-bold hover:opacity-80"
-                      style={{ color: t.teal }}
-                    >
-                      Open in Google Drive <ExternalLink size={11} />
-                    </a>
+                    {p.mcqs && p.mcqs.length > 0 ? (
+                      <span
+                        className="mt-1 flex w-fit items-center gap-1 text-[11px] font-bold"
+                        style={{ color: t.purple }}
+                      >
+                        <ListChecks size={11} /> {p.mcqs.length} manual MCQ{p.mcqs.length !== 1 ? "s" : ""}
+                      </span>
+                    ) : (
+                      <a
+                        href={p.driveUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 flex w-fit items-center gap-1 text-[11px] font-bold hover:opacity-80"
+                        style={{ color: t.teal }}
+                      >
+                        Open in Google Drive <ExternalLink size={11} />
+                      </a>
+                    )}
                   </div>
 
                   <div className="flex shrink-0 items-center gap-2">

@@ -1,6 +1,6 @@
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
-import type { FirestorePastPaper, QuestionStatus } from "../types";
+import type { FirestorePastPaper, PastPaperMCQItem, QuestionStatus } from "../types";
 import { extractDriveFileId } from "./ospeBooks";
 import { cacheFirstSnapshot } from "../utils/localCache";
 
@@ -62,7 +62,9 @@ export function toDrivePreviewUrl(url: string): string | null {
 
 export interface PastPaperInput {
   title: string;
-  driveUrl: string;
+  /** Either driveUrl (Google Drive PDF) or mcqs (manually typed questions) should be provided. */
+  driveUrl?: string;
+  mcqs?: PastPaperMCQItem[];
   description?: string;
   block: number;
   moduleName?: string;
@@ -83,18 +85,22 @@ function classifyWriteError(err: unknown): "permission-denied" | "offline" | "un
 }
 
 export async function addPastPaper(input: PastPaperInput): Promise<SavePastPaperResult> {
-  const cleanInput = {
+  const cleanInput: Record<string, unknown> = {
     ...input,
     status: input.status ?? "draft",
     createdAt: Date.now(),
   };
+  // Firestore rejects `undefined` field values — only one of driveUrl/mcqs is ever set
+  // depending on which input mode the admin used, so drop whichever one is absent.
+  if (cleanInput.driveUrl === undefined) delete cleanInput.driveUrl;
+  if (cleanInput.mcqs === undefined) delete cleanInput.mcqs;
   try {
     await addDoc(collection(db, "past_papers"), cleanInput);
     return { source: "firestore" };
   } catch (err) {
     console.warn("Firestore addPastPaper failed, appending to local store:", err);
     const localPapers: FirestorePastPaper[] = JSON.parse(localStorage.getItem(LOCAL_PAST_PAPERS_KEY) || "[]");
-    localPapers.push({ id: `local-${Date.now()}-${Math.random()}`, ...cleanInput });
+    localPapers.push({ id: `local-${Date.now()}-${Math.random()}`, ...cleanInput } as FirestorePastPaper);
     localStorage.setItem(LOCAL_PAST_PAPERS_KEY, JSON.stringify(localPapers));
     const reason = classifyWriteError(err);
     return {

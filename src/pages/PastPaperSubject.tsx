@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ChevronLeft, FileStack, FolderTree, X, ExternalLink } from "lucide-react";
+import { ChevronLeft, FileStack, FolderTree, X, ExternalLink, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
 import Spinner from "../components/Spinner";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore } from "../store/useAppStore";
@@ -24,6 +24,28 @@ export default function PastPaperSubject() {
   const [allPapers, setAllPapers] = useState<FirestorePastPaper[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [activePaper, setActivePaper] = useState<FirestorePastPaper | null>(null);
+
+  // Quiz state — only used when the active paper has manually-entered MCQs
+  // instead of (or alongside) a Google Drive link.
+  const [mcqIndex, setMcqIndex] = useState(0);
+  const [mcqSelected, setMcqSelected] = useState<number | null>(null);
+
+  const openPaper = (p: FirestorePastPaper) => {
+    setActivePaper(p);
+    setMcqIndex(0);
+    setMcqSelected(null);
+  };
+
+  const closePaper = () => {
+    setActivePaper(null);
+    setMcqIndex(0);
+    setMcqSelected(null);
+  };
+
+  const goToMcq = (idx: number) => {
+    setMcqIndex(idx);
+    setMcqSelected(null);
+  };
 
   useEffect(() => {
     const unsub = subscribePublishedPastPapers((p) => {
@@ -53,7 +75,9 @@ export default function PastPaperSubject() {
   );
 
   const meta = SUBJECT_META[subjectId as SubjectId] || { label: subjectId, tag: "" };
-  const previewUrl = activePaper ? toDrivePreviewUrl(activePaper.driveUrl) : null;
+  const previewUrl = activePaper?.driveUrl ? toDrivePreviewUrl(activePaper.driveUrl) : null;
+  const activeMcqs = activePaper?.mcqs || [];
+  const currentMcq = activeMcqs[mcqIndex];
 
   if (!Number.isInteger(blockNum) || !subjectId) {
     return (
@@ -120,7 +144,7 @@ export default function PastPaperSubject() {
           {papers.map((p) => (
             <button
               key={p.id}
-              onClick={() => setActivePaper(p)}
+              onClick={() => openPaper(p)}
               className="flex items-center gap-3 rounded-xl p-3 text-left transition-all hover:scale-[1.01]"
               style={{ backgroundColor: t.surfaceAlt, border: `1px solid ${t.border}` }}
             >
@@ -134,6 +158,11 @@ export default function PastPaperSubject() {
                 <div className="truncate text-sm font-bold">{p.title}</div>
                 {p.description && (
                   <div className="truncate text-[11px]" style={{ color: t.textFaint }}>{p.description}</div>
+                )}
+                {p.mcqs && p.mcqs.length > 0 && (
+                  <div className="truncate text-[11px] font-semibold" style={{ color: t.teal }}>
+                    {p.mcqs.length} MCQ{p.mcqs.length !== 1 ? "s" : ""}
+                  </div>
                 )}
               </div>
             </button>
@@ -154,17 +183,19 @@ export default function PastPaperSubject() {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <a
-                href={activePaper.driveUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold"
-                style={{ backgroundColor: t.surfaceAlt, color: t.teal }}
-              >
-                Open in Drive <ExternalLink size={12} />
-              </a>
+              {activePaper.driveUrl && (
+                <a
+                  href={activePaper.driveUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold"
+                  style={{ backgroundColor: t.surfaceAlt, color: t.teal }}
+                >
+                  Open in Drive <ExternalLink size={12} />
+                </a>
+              )}
               <button
-                onClick={() => setActivePaper(null)}
+                onClick={closePaper}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
                 style={{ backgroundColor: t.surfaceAlt }}
                 aria-label="Close"
@@ -173,8 +204,77 @@ export default function PastPaperSubject() {
               </button>
             </div>
           </div>
-          <div className="min-h-0 flex-1">
-            {previewUrl ? (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {activeMcqs.length > 0 && currentMcq ? (
+              <div className="mx-auto flex max-w-2xl flex-col gap-4 p-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold" style={{ color: t.textMuted }}>
+                    Question {mcqIndex + 1} of {activeMcqs.length}
+                  </span>
+                  <div className="flex gap-1">
+                    {activeMcqs.map((_, i) => (
+                      <span
+                        key={i}
+                        className="h-1.5 w-5 rounded-full"
+                        style={{ backgroundColor: i === mcqIndex ? t.teal : t.border }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <h4 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>{currentMcq.q}</h4>
+
+                <div className="flex flex-col gap-2">
+                  {currentMcq.options.map((opt, optIdx) => {
+                    const isCorrect = optIdx === currentMcq.correct;
+                    const isPicked = optIdx === mcqSelected;
+                    const revealed = mcqSelected !== null;
+                    return (
+                      <button
+                        key={optIdx}
+                        onClick={() => setMcqSelected(optIdx)}
+                        disabled={revealed}
+                        className="flex items-center justify-between gap-2 rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold transition-all"
+                        style={{
+                          backgroundColor: revealed && isCorrect ? `${t.green}20` : revealed && isPicked ? `${t.red}15` : t.surfaceAlt,
+                          border: `1.5px solid ${revealed && isCorrect ? t.green : revealed && isPicked ? t.red : t.border}`,
+                          color: revealed && isCorrect ? t.green : revealed && isPicked ? t.red : t.text,
+                        }}
+                      >
+                        <span>{opt}</span>
+                        {revealed && isCorrect && <CheckCircle2 size={16} />}
+                        {revealed && isPicked && !isCorrect && <XCircle size={16} />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {mcqSelected !== null && currentMcq.explanation && (
+                  <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}>
+                    {currentMcq.explanation}
+                  </div>
+                )}
+
+                <div className="mt-2 flex items-center justify-between">
+                  <button
+                    onClick={() => goToMcq(Math.max(0, mcqIndex - 1))}
+                    disabled={mcqIndex === 0}
+                    className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-40"
+                    style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}
+                  >
+                    <ChevronLeft size={14} /> Previous
+                  </button>
+                  <button
+                    onClick={() => goToMcq(Math.min(activeMcqs.length - 1, mcqIndex + 1))}
+                    disabled={mcqIndex === activeMcqs.length - 1}
+                    className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-40"
+                    style={{ backgroundColor: t.teal, color: "#fff" }}
+                  >
+                    Next <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+            ) : previewUrl ? (
               <iframe src={previewUrl} title={activePaper.title} className="h-full w-full" allow="autoplay" />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-2 p-10 text-center">
