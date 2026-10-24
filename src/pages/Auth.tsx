@@ -42,7 +42,7 @@ export default function Auth() {
         navigate("/paywall");
       } else {
         await logIn(cleanEmail, form.password);
-        navigate("/subjects");
+        navigate("/");
       }
     } catch (err) {
       setError(authErrorMessage(err));
