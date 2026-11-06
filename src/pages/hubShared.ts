@@ -48,16 +48,19 @@ export function entriesFromTests(tests: TestSessionDoc[]): HubEntry[] {
   return out;
 }
 
+/** Papers must have a module and a subheading — anything without both is left off the tree (no "General" bucket). */
+export const paperIsPlaceable = (p: FirestorePastPaper) => !!(p.moduleName || "").trim() && !!(p.topicName || "").trim();
+
 export function entriesFromPapers(papers: FirestorePastPaper[]): HubEntry[] {
-  return papers.map((p) => {
-    const moduleName = (p.moduleName || "").trim() || GENERAL_LABEL;
+  return papers.filter(paperIsPlaceable).map((p) => {
+    const moduleName = (p.moduleName || "").trim();
     return {
       id: p.id,
       block: p.block,
       moduleId: slugify(moduleName),
       moduleName,
       subjectId: p.subjectId,
-      topic: (p.topicName || "").trim() || null,
+      topic: (p.topicName || "").trim(),
     };
   });
 }

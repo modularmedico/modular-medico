@@ -165,10 +165,10 @@ export interface FirestorePastPaper {
   mcqs?: PastPaperMCQItem[];
   description?: string;
   block: number; // 1..15
-  /** Module name (e.g. "Cardiovascular-I"). Missing on older papers -> shown under "General". */
+  /** Module name (e.g. "Cardiovascular-I"). Required for new papers; very old papers may lack it and stay hidden until edited. */
   moduleName?: string;
   subjectId: string;
-  /** Subheading / topic inside the subject. Missing on older papers -> shown under "General". */
+  /** Subheading inside the subject. Required for new papers; very old papers may lack it and stay hidden until edited. */
   topicName?: string;
   status: QuestionStatus; // reuse "draft" | "published"
   order?: number;

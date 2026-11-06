@@ -12,8 +12,9 @@ import { cacheFirstSnapshot } from "../utils/localCache";
  *
  * Unlike OSPE Material (Subject-only), each Past Paper is scoped to
  * Block -> Module -> Subject -> Subheading — e.g. "Block 3 / Cardiovascular-I /
- * Gross Anatomy / Heart / Final Term 2024". Module and Subheading are optional
- * (older papers don't have them and show under "General").
+ * Gross Anatomy / Heart / Final Term 2024". All four are required; there is no
+ * "General" bucket. Older papers saved without a module/subheading are hidden
+ * from students until an admin edits them and assigns one.
  */
 
 const LOCAL_PAST_PAPERS_KEY = "modular_medico_local_past_papers";
@@ -67,11 +68,19 @@ export interface PastPaperInput {
   mcqs?: PastPaperMCQItem[];
   description?: string;
   block: number;
-  moduleName?: string;
+  moduleName: string;
   subjectId: string;
-  topicName?: string;
+  topicName: string;
   status?: QuestionStatus;
 }
+
+/** Fields an admin can change on an existing paper (including its MCQs). */
+export type PastPaperPatch = Partial<
+  Pick<
+    FirestorePastPaper,
+    "title" | "description" | "driveUrl" | "mcqs" | "block" | "moduleName" | "subjectId" | "topicName" | "status"
+  >
+>;
 
 export type SavePastPaperResult =
   | { source: "firestore" }
@@ -127,6 +136,30 @@ export async function updatePastPaperStatus(id: string, status: QuestionStatus) 
       found.status = status;
       localStorage.setItem(LOCAL_PAST_PAPERS_KEY, JSON.stringify(localPapers));
     }
+  }
+}
+
+/**
+ * Edit an existing paper — metadata, placement, and its MCQ list. Writes to Firestore;
+ * if that fails and the paper only exists in this browser's local store, edits that copy.
+ */
+export async function updatePastPaper(id: string, patch: PastPaperPatch): Promise<SavePastPaperResult> {
+  const clean: Record<string, unknown> = {};
+  Object.entries(patch).forEach(([k, v]) => {
+    if (v !== undefined) clean[k] = v;
+  });
+  try {
+    await updateDoc(doc(db, "past_papers", id), clean);
+    return { source: "firestore" };
+  } catch (err) {
+    console.warn("Firestore updatePastPaper failed:", err);
+    const localPapers: FirestorePastPaper[] = JSON.parse(localStorage.getItem(LOCAL_PAST_PAPERS_KEY) || "[]");
+    const idx = localPapers.findIndex((p) => p.id === id);
+    if (idx === -1) throw err;
+    localPapers[idx] = { ...localPapers[idx], ...clean } as FirestorePastPaper;
+    localStorage.setItem(LOCAL_PAST_PAPERS_KEY, JSON.stringify(localPapers));
+    const reason = classifyWriteError(err);
+    return { source: "local", reason, message: "Saved to this browser only (Firestore rejected the write)." };
   }
 }
 

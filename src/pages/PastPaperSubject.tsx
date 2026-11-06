@@ -5,7 +5,7 @@ import Spinner from "../components/Spinner";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import { SUBJECT_META, type SubjectId } from "../data/subjects";
-import { GENERAL_LABEL, GENERAL_KEY, matchesFilter, slugify } from "./hubShared";
+import { matchesFilter, paperIsPlaceable, slugify } from "./hubShared";
 import { subscribePublishedPastPapers, toDrivePreviewUrl } from "../services/pastPapers";
 import type { FirestorePastPaper } from "../types";
 
@@ -59,14 +59,15 @@ export default function PastPaperSubject() {
     () =>
       allPapers.filter(
         (p) =>
+          paperIsPlaceable(p) &&
           p.block === blockNum &&
           p.subjectId === subjectId &&
           matchesFilter(
             {
               block: p.block,
-              moduleId: slugify((p.moduleName || "").trim() || GENERAL_LABEL),
+              moduleId: slugify((p.moduleName || "").trim()),
               subjectId: p.subjectId,
-              topic: (p.topicName || "").trim() || null,
+              topic: (p.topicName || "").trim(),
             },
             { module: fModule, topic: fTopic }
           )
@@ -111,9 +112,7 @@ export default function PastPaperSubject() {
           {meta.label} — Past Papers
         </h1>
         {fTopic && (
-          <p style={{ color: t.textMuted, fontSize: 13.5, marginTop: 2 }}>
-            {fTopic === GENERAL_KEY ? GENERAL_LABEL : fTopic}
-          </p>
+          <p style={{ color: t.textMuted, fontSize: 13.5, marginTop: 2 }}>{fTopic}</p>
         )}
       </div>
 

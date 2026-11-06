@@ -107,6 +107,7 @@ import {
   deletePastPaper,
   subscribeAllPastPapers,
 } from "../services/pastPapers";
+import PastPaperEditor, { ModuleOptions } from "../components/admin/PastPaperEditor";
 import { subscribeAllTestEntries, summarizeTestAnalytics, type TestAnalytics } from "../services/testLeaderboard";
 import {
   subscribeSiteStatsSummary,
@@ -779,8 +780,8 @@ export default function AdminPanel() {
   }, [ospeBooks, ospeFilterSubject, ospeFilterStatus, ospeSearchQuery]);
 
   /* ------------------------------------------------------------------------- */
-  /* PAST PAPERS STATE (Block + Subject scoped only — a Google Drive PDF link  */
-  /* per previous exam paper, no Module/Topic)                                 */
+  /* PAST PAPERS STATE (Block -> Module -> Subject -> Subheading, all required) */
+  /*                                                                           */
   /* ------------------------------------------------------------------------- */
   const [pastPapers, setPastPapers] = useState<FirestorePastPaper[]>([]);
   const [loadingPastPapers, setLoadingPastPapers] = useState(true);
@@ -826,7 +827,22 @@ export default function AdminPanel() {
     return parsedPastPaperMCQs.filter((p) => p.status === "error");
   }, [parsedPastPaperMCQs]);
 
+  const [editingPastPaperId, setEditingPastPaperId] = useState<string | null>(null);
+
+  // Subheadings already used under the chosen Block/Module/Subject — offered as suggestions
+  // in the Add form so names stay consistent.
+  const knownPastPaperSubheadings = useMemo(() => {
+    const set = new Set<string>();
+    pastPapers.forEach((p) => {
+      if (p.block === pastPaperBlock && p.moduleName === pastPaperModuleName && p.subjectId === pastPaperSubjectId && p.topicName?.trim())
+        set.add(p.topicName.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [pastPapers, pastPaperBlock, pastPaperModuleName, pastPaperSubjectId]);
+
   const isPastPaperValid =
+    pastPaperModuleName.trim().length > 0 &&
+    pastPaperTopicName.trim().length > 0 &&
     pastPaperTitle.trim().length > 0 &&
     (pastPaperInputMode === "drive" ? pastPaperDriveUrl.trim().length > 0 : validPastPaperMCQs.length > 0);
 
@@ -3814,7 +3830,7 @@ export default function AdminPanel() {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB: ADD PAST PAPER (Block + Subject scoped, no Module/Topic)          */}
+      {/* TAB: ADD PAST PAPER (Block -> Module -> Subject -> Subheading)          */}
       {/* ===================================================================== */}
       {activeTab === "add_past_paper" && (
         <div className="flex flex-col gap-6">
@@ -3823,18 +3839,18 @@ export default function AdminPanel() {
               <div className="flex items-center gap-2">
                 <FileStack size={17} color={t.purple} />
                 <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>
-                  Target Assignment (Block + Subject)
+                  Where does this paper go?
                 </span>
               </div>
               <span className="text-xs" style={{ color: t.textFaint }}>
-                Block &rarr; Module &rarr; Subject &rarr; Subheading (module &amp; subheading optional)
+                Block &rarr; Module &rarr; Subject &rarr; Subheading
               </span>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  Target Block
+                  1 &middot; Block
                 </label>
                 <select
                   value={pastPaperBlock}
@@ -3852,7 +3868,21 @@ export default function AdminPanel() {
 
               <div>
                 <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  Discipline / Subject
+                  2 &middot; Module
+                </label>
+                <select
+                  value={pastPaperModuleName}
+                  onChange={(e) => setPastPaperModuleName(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${pastPaperModuleName ? t.border : t.red}`, color: t.text }}
+                >
+                  <ModuleOptions block={pastPaperBlock} t={t} current={pastPaperModuleName} />
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
+                  3 &middot; Subject
                 </label>
                 <select
                   value={pastPaperSubjectId}
@@ -3870,37 +3900,22 @@ export default function AdminPanel() {
 
               <div>
                 <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  Module (optional)
-                </label>
-                <select
-                  value={pastPaperModuleName}
-                  onChange={(e) => setPastPaperModuleName(e.target.value)}
-                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
-                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
-                >
-                  <option value="" style={{ backgroundColor: t.surface, color: t.text }}>
-                    General (no module)
-                  </option>
-                  {MASTER_MODULES.map((m) => (
-                    <option key={m.id} value={m.name} style={{ backgroundColor: t.surface, color: t.text }}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  Subheading (optional)
+                  4 &middot; Subheading
                 </label>
                 <input
                   type="text"
+                  list="past-paper-subheadings"
                   value={pastPaperTopicName}
                   onChange={(e) => setPastPaperTopicName(e.target.value)}
-                  placeholder="e.g. Heart — leave empty for General"
+                  placeholder="e.g. Heart"
                   className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
-                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${pastPaperTopicName.trim() ? t.border : t.red}`, color: t.text }}
                 />
+                <datalist id="past-paper-subheadings">
+                  {knownPastPaperSubheadings.map((sh) => (
+                    <option key={sh} value={sh} />
+                  ))}
+                </datalist>
               </div>
             </div>
 
@@ -3908,9 +3923,9 @@ export default function AdminPanel() {
             <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt }}>
               <span className="font-bold" style={{ color: t.textMuted }}>Adding to:</span>
               <Pill t={t} tone="teal">Block {pastPaperBlock}</Pill>
-              {pastPaperModuleName && <Pill t={t} tone="purple">{pastPaperModuleName}</Pill>}
+              <Pill t={t} tone="purple">{pastPaperModuleName || "— pick a module"}</Pill>
               <Pill t={t} tone="gold">{SUBJECT_META[pastPaperSubjectId].label}</Pill>
-              {pastPaperTopicName.trim() && <Pill t={t} tone="green">{pastPaperTopicName.trim()}</Pill>}
+              <Pill t={t} tone="green">{pastPaperTopicName.trim() || "— enter a subheading"}</Pill>
             </div>
           </Card>
 
@@ -4153,7 +4168,19 @@ export default function AdminPanel() {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {filteredPastPapers.map((p) => (
+              {filteredPastPapers.map((p) => editingPastPaperId === p.id ? (
+                <PastPaperEditor
+                  key={p.id}
+                  paper={p}
+                  t={t}
+                  knownSubheadings={Array.from(new Set(pastPapers.map((x) => (x.topicName || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))}
+                  onClose={() => setEditingPastPaperId(null)}
+                  onNotice={(msg) => {
+                    setActionNotice(msg);
+                    setTimeout(() => setActionNotice(null), 3500);
+                  }}
+                />
+              ) : (
                 <div
                   key={p.id}
                   className="flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between"
@@ -4162,7 +4189,18 @@ export default function AdminPanel() {
                   <div className="min-w-0 flex-1">
                     <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
                       <Pill t={t} tone="teal">Block {p.block}</Pill>
+                      {p.moduleName?.trim() && <Pill t={t} tone="purple">{p.moduleName}</Pill>}
                       <Pill t={t} tone="gold">{SUBJECT_META[p.subjectId as SubjectId]?.label || p.subjectId}</Pill>
+                      {p.topicName?.trim() && <Pill t={t} tone="green">{p.topicName}</Pill>}
+                      {(!p.moduleName?.trim() || !p.topicName?.trim()) && (
+                        <span
+                          className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                          style={{ backgroundColor: `${t.red}18`, color: t.red }}
+                          title="Hidden from students until a module and subheading are set"
+                        >
+                          <AlertTriangle size={10} /> Needs module &amp; subheading
+                        </span>
+                      )}
                       <span
                         className="rounded-full px-2 py-0.5 text-[10px] font-bold"
                         style={{
@@ -4184,7 +4222,7 @@ export default function AdminPanel() {
                       >
                         <ListChecks size={11} /> {p.mcqs.length} manual MCQ{p.mcqs.length !== 1 ? "s" : ""}
                       </span>
-                    ) : (
+                    ) : p.driveUrl ? (
                       <a
                         href={p.driveUrl}
                         target="_blank"
@@ -4194,10 +4232,18 @@ export default function AdminPanel() {
                       >
                         Open in Google Drive <ExternalLink size={11} />
                       </a>
-                    )}
+                    ) : null}
                   </div>
 
                   <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      onClick={() => setEditingPastPaperId(p.id)}
+                      className="flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-bold"
+                      style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}`, color: t.teal }}
+                      title="Edit paper and its MCQs"
+                    >
+                      <Pencil size={14} /> Edit
+                    </button>
                     <button
                       onClick={() => handleTogglePastPaperStatus(p)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl"
