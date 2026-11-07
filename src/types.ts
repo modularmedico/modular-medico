@@ -165,10 +165,11 @@ export interface FirestorePastPaper {
   mcqs?: PastPaperMCQItem[];
   description?: string;
   block: number; // 1..15
-  /** Module name (e.g. "Cardiovascular-I"). Required for new papers; very old papers may lack it and stay hidden until edited. */
+  /** @deprecated Legacy field — past papers are organised Block -> Subheading only; no longer written or read. */
   moduleName?: string;
-  subjectId: string;
-  /** Subheading inside the subject. Required for new papers; very old papers may lack it and stay hidden until edited. */
+  /** @deprecated Legacy field — past papers are organised Block -> Subheading only; no longer written or read. */
+  subjectId?: string;
+  /** Subheading inside the Block. Required — papers without one are hidden from students until an admin assigns one. */
   topicName?: string;
   status: QuestionStatus; // reuse "draft" | "published"
   order?: number;

@@ -107,7 +107,7 @@ import {
   deletePastPaper,
   subscribeAllPastPapers,
 } from "../services/pastPapers";
-import PastPaperEditor, { ModuleOptions } from "../components/admin/PastPaperEditor";
+import PastPaperEditor from "../components/admin/PastPaperEditor";
 import { subscribeAllTestEntries, summarizeTestAnalytics, type TestAnalytics } from "../services/testLeaderboard";
 import {
   subscribeSiteStatsSummary,
@@ -780,7 +780,7 @@ export default function AdminPanel() {
   }, [ospeBooks, ospeFilterSubject, ospeFilterStatus, ospeSearchQuery]);
 
   /* ------------------------------------------------------------------------- */
-  /* PAST PAPERS STATE (Block -> Module -> Subject -> Subheading, all required) */
+  /* PAST PAPERS STATE (Block -> Subheading, both required)                     */
   /*                                                                           */
   /* ------------------------------------------------------------------------- */
   const [pastPapers, setPastPapers] = useState<FirestorePastPaper[]>([]);
@@ -800,8 +800,6 @@ export default function AdminPanel() {
   }, []);
 
   const [pastPaperBlock, setPastPaperBlock] = useState<number>(1);
-  const [pastPaperSubjectId, setPastPaperSubjectId] = useState<SubjectId>("gross_anatomy");
-  const [pastPaperModuleName, setPastPaperModuleName] = useState<string>("");
   const [pastPaperTopicName, setPastPaperTopicName] = useState<string>("");
   const [pastPaperTitle, setPastPaperTitle] = useState("");
   const [pastPaperDriveUrl, setPastPaperDriveUrl] = useState("");
@@ -829,19 +827,17 @@ export default function AdminPanel() {
 
   const [editingPastPaperId, setEditingPastPaperId] = useState<string | null>(null);
 
-  // Subheadings already used under the chosen Block/Module/Subject — offered as suggestions
+  // Subheadings already used under the chosen Block — offered as suggestions
   // in the Add form so names stay consistent.
   const knownPastPaperSubheadings = useMemo(() => {
     const set = new Set<string>();
     pastPapers.forEach((p) => {
-      if (p.block === pastPaperBlock && p.moduleName === pastPaperModuleName && p.subjectId === pastPaperSubjectId && p.topicName?.trim())
-        set.add(p.topicName.trim());
+      if (p.block === pastPaperBlock && p.topicName?.trim()) set.add(p.topicName.trim());
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }, [pastPapers, pastPaperBlock, pastPaperModuleName, pastPaperSubjectId]);
+  }, [pastPapers, pastPaperBlock]);
 
   const isPastPaperValid =
-    pastPaperModuleName.trim().length > 0 &&
     pastPaperTopicName.trim().length > 0 &&
     pastPaperTitle.trim().length > 0 &&
     (pastPaperInputMode === "drive" ? pastPaperDriveUrl.trim().length > 0 : validPastPaperMCQs.length > 0);
@@ -863,8 +859,6 @@ export default function AdminPanel() {
             }),
         description: pastPaperDescription.trim(),
         block: pastPaperBlock,
-        moduleName: pastPaperModuleName.trim(),
-        subjectId: pastPaperSubjectId,
         topicName: pastPaperTopicName.trim(),
         status: (pastPaperPublishImmediately ? "published" : "draft") as QuestionStatus,
       });
@@ -912,7 +906,7 @@ export default function AdminPanel() {
   };
 
   const [pastPaperFilterBlock, setPastPaperFilterBlock] = useState<string>("all");
-  const [pastPaperFilterSubject, setPastPaperFilterSubject] = useState<string>("all");
+  const [pastPaperFilterTopic, setPastPaperFilterTopic] = useState<string>("all");
   const [pastPaperFilterStatus, setPastPaperFilterStatus] = useState<string>("all");
   const [pastPaperSearchQuery, setPastPaperSearchQuery] = useState("");
 
@@ -920,7 +914,7 @@ export default function AdminPanel() {
     return pastPapers
       .filter((p) => {
         if (pastPaperFilterBlock !== "all" && p.block !== Number(pastPaperFilterBlock)) return false;
-        if (pastPaperFilterSubject !== "all" && p.subjectId !== pastPaperFilterSubject) return false;
+        if (pastPaperFilterTopic !== "all" && (p.topicName || "").trim() !== pastPaperFilterTopic) return false;
         if (pastPaperFilterStatus !== "all" && p.status !== pastPaperFilterStatus) return false;
         if (pastPaperSearchQuery.trim()) {
           const query = pastPaperSearchQuery.toLowerCase();
@@ -931,7 +925,7 @@ export default function AdminPanel() {
         return true;
       })
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  }, [pastPapers, pastPaperFilterBlock, pastPaperFilterSubject, pastPaperFilterStatus, pastPaperSearchQuery]);
+  }, [pastPapers, pastPaperFilterBlock, pastPaperFilterTopic, pastPaperFilterStatus, pastPaperSearchQuery]);
 
   /* ------------------------------------------------------------------------- */
   /* BOOKS & STUDY NOTES STATE (Block -> Module -> Subject scoped, like        */
@@ -2837,7 +2831,7 @@ export default function AdminPanel() {
                 </span>
               </div>
               <span className="text-xs" style={{ color: t.textFaint }}>
-                Lectures follow the same Block &rarr; Module &rarr; Subject &rarr; Subheading scaffold as MCQs
+                Lectures follow the same Block &rarr; Subheading scaffold as MCQs
               </span>
             </div>
 
@@ -3868,39 +3862,7 @@ export default function AdminPanel() {
 
               <div>
                 <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  2 &middot; Module
-                </label>
-                <select
-                  value={pastPaperModuleName}
-                  onChange={(e) => setPastPaperModuleName(e.target.value)}
-                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
-                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${pastPaperModuleName ? t.border : t.red}`, color: t.text }}
-                >
-                  <ModuleOptions block={pastPaperBlock} t={t} current={pastPaperModuleName} />
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  3 &middot; Subject
-                </label>
-                <select
-                  value={pastPaperSubjectId}
-                  onChange={(e) => setPastPaperSubjectId(e.target.value as SubjectId)}
-                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
-                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
-                >
-                  {SUBJECT_LIST.map((s) => (
-                    <option key={s} value={s} style={{ backgroundColor: t.surface, color: t.text }}>
-                      {SUBJECT_META[s].label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  4 &middot; Subheading
+                  2 &middot; Subheading
                 </label>
                 <input
                   type="text"
@@ -3923,8 +3885,6 @@ export default function AdminPanel() {
             <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt }}>
               <span className="font-bold" style={{ color: t.textMuted }}>Adding to:</span>
               <Pill t={t} tone="teal">Block {pastPaperBlock}</Pill>
-              <Pill t={t} tone="purple">{pastPaperModuleName || "— pick a module"}</Pill>
-              <Pill t={t} tone="gold">{SUBJECT_META[pastPaperSubjectId].label}</Pill>
               <Pill t={t} tone="green">{pastPaperTopicName.trim() || "— enter a subheading"}</Pill>
             </div>
           </Card>
@@ -4130,15 +4090,24 @@ export default function AdminPanel() {
                   ))}
                 </select>
                 <select
-                  value={pastPaperFilterSubject}
-                  onChange={(e) => setPastPaperFilterSubject(e.target.value)}
+                  value={pastPaperFilterTopic}
+                  onChange={(e) => setPastPaperFilterTopic(e.target.value)}
                   className="rounded-xl px-3 py-2 text-xs font-bold outline-none"
                   style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
                 >
-                  <option value="all">All Subjects</option>
-                  {SUBJECT_LIST.map((s) => (
-                    <option key={s} value={s}>{SUBJECT_META[s].label}</option>
-                  ))}
+                  <option value="all">All Subheadings</option>
+                  {Array.from(
+                    new Set(
+                      pastPapers
+                        .filter((p) => pastPaperFilterBlock === "all" || p.block === Number(pastPaperFilterBlock))
+                        .map((p) => (p.topicName || "").trim())
+                        .filter(Boolean)
+                    )
+                  )
+                    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                    .map((sh) => (
+                      <option key={sh} value={sh}>{sh}</option>
+                    ))}
                 </select>
                 <select
                   value={pastPaperFilterStatus}
@@ -4173,7 +4142,7 @@ export default function AdminPanel() {
                   key={p.id}
                   paper={p}
                   t={t}
-                  knownSubheadings={Array.from(new Set(pastPapers.map((x) => (x.topicName || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))}
+                  knownSubheadings={Array.from(new Set(pastPapers.filter((x) => x.block === p.block).map((x) => (x.topicName || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))}
                   onClose={() => setEditingPastPaperId(null)}
                   onNotice={(msg) => {
                     setActionNotice(msg);
@@ -4189,16 +4158,14 @@ export default function AdminPanel() {
                   <div className="min-w-0 flex-1">
                     <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
                       <Pill t={t} tone="teal">Block {p.block}</Pill>
-                      {p.moduleName?.trim() && <Pill t={t} tone="purple">{p.moduleName}</Pill>}
-                      <Pill t={t} tone="gold">{SUBJECT_META[p.subjectId as SubjectId]?.label || p.subjectId}</Pill>
                       {p.topicName?.trim() && <Pill t={t} tone="green">{p.topicName}</Pill>}
-                      {(!p.moduleName?.trim() || !p.topicName?.trim()) && (
+                      {!p.topicName?.trim() && (
                         <span
                           className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
                           style={{ backgroundColor: `${t.red}18`, color: t.red }}
-                          title="Hidden from students until a module and subheading are set"
+                          title="Hidden from students until a subheading is set"
                         >
-                          <AlertTriangle size={10} /> Needs module &amp; subheading
+                          <AlertTriangle size={10} /> Needs a subheading
                         </span>
                       )}
                       <span

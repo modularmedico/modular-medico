@@ -19,7 +19,7 @@ import Profile from "./pages/Profile";
 import Lectures from "./pages/Lectures";
 import OspeBooks from "./pages/OspeBooks";
 import StudyNotes from "./pages/StudyNotes";
-import PastPaperSubject from "./pages/PastPaperSubject";
+import PastPaperList from "./pages/PastPaperList";
 import Shop from "./pages/Shop";
 import AdminGate from "./pages/AdminGate";
 import AdminPanel from "./pages/AdminPanel";
@@ -40,7 +40,7 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Old URLs keep working: they forward into the new Block > Module > Subject > Subheading flow.
+// Old URLs keep working: they forward into the new browse flow (Past Papers: Block > Subheading).
 function RedirectToBrowse({ kind }: { kind: "mcqs" | "papers" }) {
   const { block } = useParams();
   return <Navigate to={`/browse/${kind}${block ? `/${block}` : ""}`} replace />;
@@ -125,8 +125,8 @@ export default function App() {
           <Route path="/ospe-books" element={<OspeBooks />} />
           <Route path="/study-notes" element={<StudyNotes />} />
           <Route path="/past-papers" element={<RedirectToBrowse kind="papers" />} />
-          <Route path="/past-papers/:block" element={<RedirectToBrowse kind="papers" />} />
-          <Route path="/past-papers/:block/:subjectId" element={<PastPaperSubject />} />
+          <Route path="/past-papers/:block" element={<PastPaperList />} />
+          <Route path="/past-papers/:block/:subjectId" element={<RedirectToBrowse kind="papers" />} />
           <Route path="/shop" element={<Shop />} />
           <Route path="/paywall" element={<Paywall />} />
         </Route>

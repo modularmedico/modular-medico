@@ -4,7 +4,6 @@ import Card from "../Card";
 import Btn from "../Btn";
 import { FONT_DISPLAY } from "../../theme";
 import { THEME } from "../../theme";
-import { MASTER_MODULES, SUBJECT_LIST, SUBJECT_META, type SubjectId } from "../../data/subjects";
 import { parseBracketFormat } from "../../utils/parseBracketFormat";
 import { updatePastPaper } from "../../services/pastPapers";
 import type { FirestorePastPaper, PastPaperMCQItem } from "../../types";
@@ -12,43 +11,6 @@ import type { FirestorePastPaper, PastPaperMCQItem } from "../../types";
 type Theme = (typeof THEME)["dark"];
 
 const TOTAL_BLOCKS = 15;
-
-/** Module <option>s: modules suggested for the chosen Block first, then the rest. */
-export function ModuleOptions({ block, t, current }: { block: number; t: Theme; current?: string }) {
-  const suggested = MASTER_MODULES.filter((m) => m.suggestedBlock === block);
-  const others = MASTER_MODULES.filter((m) => m.suggestedBlock !== block);
-  const optStyle = { backgroundColor: t.surface, color: t.text };
-  // A paper may carry a module name that isn't in the master list — keep it selectable.
-  const orphan = current && !MASTER_MODULES.some((m) => m.name === current) ? current : null;
-  return (
-    <>
-      <option value="" style={optStyle}>
-        Select a module…
-      </option>
-      {orphan && (
-        <option value={orphan} style={optStyle}>
-          {orphan}
-        </option>
-      )}
-      {suggested.length > 0 && (
-        <optgroup label={`Block ${block} modules`}>
-          {suggested.map((m) => (
-            <option key={m.id} value={m.name} style={optStyle}>
-              {m.name}
-            </option>
-          ))}
-        </optgroup>
-      )}
-      <optgroup label={suggested.length > 0 ? "Other modules" : "All modules"}>
-        {others.map((m) => (
-          <option key={m.id} value={m.name} style={optStyle}>
-            {m.name}
-          </option>
-        ))}
-      </optgroup>
-    </>
-  );
-}
 
 interface Props {
   paper: FirestorePastPaper;
@@ -66,8 +28,6 @@ export default function PastPaperEditor({ paper, t, knownSubheadings, onClose, o
   const [description, setDescription] = useState(paper.description || "");
   const [driveUrl, setDriveUrl] = useState(paper.driveUrl || "");
   const [block, setBlock] = useState(paper.block);
-  const [moduleName, setModuleName] = useState(paper.moduleName || "");
-  const [subjectId, setSubjectId] = useState<string>(paper.subjectId);
   const [topicName, setTopicName] = useState(paper.topicName || "");
   const [mcqs, setMcqs] = useState<PastPaperMCQItem[]>(() =>
     (paper.mcqs || []).map((m) => ({ ...m, options: [...m.options] }))
@@ -127,7 +87,7 @@ export default function PastPaperEditor({ paper, t, knownSubheadings, onClose, o
   const problems = mcqs.map(mcqProblem);
   const hasMcqProblem = problems.some(Boolean);
 
-  const placementOk = !!moduleName.trim() && !!topicName.trim();
+  const placementOk = !!topicName.trim();
   const hasContent = driveUrl.trim().length > 0 || mcqs.length > 0;
   const canSave = title.trim().length > 0 && placementOk && hasContent && !hasMcqProblem && !saving;
 
@@ -148,8 +108,6 @@ export default function PastPaperEditor({ paper, t, knownSubheadings, onClose, o
         driveUrl: driveUrl.trim(),
         mcqs: cleanMcqs,
         block,
-        moduleName: moduleName.trim(),
-        subjectId,
         topicName: topicName.trim(),
       });
       onNotice(
@@ -180,7 +138,7 @@ export default function PastPaperEditor({ paper, t, knownSubheadings, onClose, o
         </button>
       </div>
 
-      {/* ---- Placement: Block -> Module -> Subject -> Subheading ---- */}
+      {/* ---- Placement: Block -> Subheading ---- */}
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className={labelCls} style={{ color: t.textFaint }}>1 · Block</label>
@@ -196,31 +154,7 @@ export default function PastPaperEditor({ paper, t, knownSubheadings, onClose, o
           </select>
         </div>
         <div>
-          <label className={labelCls} style={{ color: t.textFaint }}>2 · Module</label>
-          <select
-            value={moduleName}
-            onChange={(e) => setModuleName(e.target.value)}
-            className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
-            style={{ ...inputStyle, borderColor: moduleName ? t.border : t.red }}
-          >
-            <ModuleOptions block={block} t={t} current={moduleName} />
-          </select>
-        </div>
-        <div>
-          <label className={labelCls} style={{ color: t.textFaint }}>3 · Subject</label>
-          <select
-            value={subjectId}
-            onChange={(e) => setSubjectId(e.target.value)}
-            className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
-            style={inputStyle}
-          >
-            {SUBJECT_LIST.map((s) => (
-              <option key={s} value={s}>{SUBJECT_META[s as SubjectId].label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className={labelCls} style={{ color: t.textFaint }}>4 · Subheading</label>
+          <label className={labelCls} style={{ color: t.textFaint }}>2 · Subheading</label>
           <input
             type="text"
             list={datalistId}
@@ -414,7 +348,7 @@ export default function PastPaperEditor({ paper, t, knownSubheadings, onClose, o
       {/* ---- Footer ---- */}
       {!placementOk && (
         <p className="mt-4 flex items-center gap-1.5 text-xs font-semibold" style={{ color: t.red }}>
-          <AlertTriangle size={13} /> Pick a module and enter a subheading — every paper needs both.
+          <AlertTriangle size={13} /> Enter a subheading — every paper needs one.
         </p>
       )}
       {placementOk && !hasContent && (

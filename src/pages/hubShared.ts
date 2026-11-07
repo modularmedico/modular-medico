@@ -3,8 +3,8 @@ import { SUBJECT_META, type SubjectId } from "../data/subjects";
 
 /**
  * Shared bits for the 3 home boxes (Practice MCQs, Test Sessions, UHS Past Papers).
- * All three use the same drill-down:
- *   Blocks -> Modules -> Subjects -> Subheadings
+ * MCQs and Tests drill down:  Blocks -> Modules -> Subjects -> Subheadings
+ * Past Papers drill down:      Blocks -> Subheadings -> papers
  * each level being its own page under /browse/:kind/...
  */
 export type HubKind = "mcqs" | "tests" | "papers";
@@ -48,21 +48,19 @@ export function entriesFromTests(tests: TestSessionDoc[]): HubEntry[] {
   return out;
 }
 
-/** Papers must have a module and a subheading — anything without both is left off the tree (no "General" bucket). */
-export const paperIsPlaceable = (p: FirestorePastPaper) => !!(p.moduleName || "").trim() && !!(p.topicName || "").trim();
+/** Papers only need a subheading (Block -> Subheading) — anything without one is left off the tree (no "General" bucket). */
+export const paperIsPlaceable = (p: FirestorePastPaper) => !!(p.topicName || "").trim();
 
 export function entriesFromPapers(papers: FirestorePastPaper[]): HubEntry[] {
-  return papers.filter(paperIsPlaceable).map((p) => {
-    const moduleName = (p.moduleName || "").trim();
-    return {
-      id: p.id,
-      block: p.block,
-      moduleId: slugify(moduleName),
-      moduleName,
-      subjectId: p.subjectId,
-      topic: (p.topicName || "").trim(),
-    };
-  });
+  return papers.filter(paperIsPlaceable).map((p) => ({
+    id: p.id,
+    block: p.block,
+    // Past papers have no Module/Subject level — these stay empty.
+    moduleId: "",
+    moduleName: "",
+    subjectId: "",
+    topic: (p.topicName || "").trim(),
+  }));
 }
 
 /** Number of distinct tests/papers in a set of entries (a test can touch the same node twice). */

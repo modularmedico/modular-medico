@@ -11,10 +11,11 @@ import { cacheFirstSnapshot } from "../utils/localCache";
  * offline) still shows up in this browser instead of silently vanishing.
  *
  * Unlike OSPE Material (Subject-only), each Past Paper is scoped to
- * Block -> Module -> Subject -> Subheading — e.g. "Block 3 / Cardiovascular-I /
- * Gross Anatomy / Heart / Final Term 2024". All four are required; there is no
- * "General" bucket. Older papers saved without a module/subheading are hidden
- * from students until an admin edits them and assigns one.
+ * Block -> Subheading — e.g. "Block 3 / Heart / Final Term 2024". Both are
+ * required; there is no "General" bucket and no Module/Subject level. Older
+ * papers saved without a subheading are hidden from students until an admin
+ * edits them and assigns one. (Legacy moduleName/subjectId values on old
+ * papers are simply ignored.)
  */
 
 const LOCAL_PAST_PAPERS_KEY = "modular_medico_local_past_papers";
@@ -68,8 +69,6 @@ export interface PastPaperInput {
   mcqs?: PastPaperMCQItem[];
   description?: string;
   block: number;
-  moduleName: string;
-  subjectId: string;
   topicName: string;
   status?: QuestionStatus;
 }
@@ -78,7 +77,7 @@ export interface PastPaperInput {
 export type PastPaperPatch = Partial<
   Pick<
     FirestorePastPaper,
-    "title" | "description" | "driveUrl" | "mcqs" | "block" | "moduleName" | "subjectId" | "topicName" | "status"
+    "title" | "description" | "driveUrl" | "mcqs" | "block" | "topicName" | "status"
   >
 >;
 

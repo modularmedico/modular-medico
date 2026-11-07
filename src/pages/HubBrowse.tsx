@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -69,11 +69,15 @@ interface Row {
 }
 
 /**
- * One page component for all four drill-down levels of all three hubs:
+ * One page component for the drill-down levels of all three hubs.
+ * MCQs & Tests:
  *   /browse/:kind                              -> Blocks
  *   /browse/:kind/:block                       -> Modules
  *   /browse/:kind/:block/:moduleId             -> Subjects
  *   /browse/:kind/:block/:moduleId/:subjectId  -> Subheadings
+ * Past Papers (no Module/Subject level):
+ *   /browse/papers                             -> Blocks
+ *   /browse/papers/:block                      -> Subheadings  (tap -> /past-papers/:block?topic=...)
  */
 export default function HubBrowse() {
   const navigate = useNavigate();
@@ -81,7 +85,9 @@ export default function HubBrowse() {
   const kind: HubKind = isHubKind(kindParam) ? kindParam : "mcqs";
   const info = KIND_INFO[kind];
   const blockNum = blockParam === undefined ? undefined : Number(blockParam);
-  const level: 0 | 1 | 2 | 3 = blockNum === undefined ? 0 : !moduleId ? 1 : !subjectId ? 2 : 3;
+  const isPapers = kind === "papers";
+  // Past Papers skip Modules & Subjects: a Block opens straight onto its Subheadings (level 1).
+  const level: 0 | 1 | 2 | 3 = blockNum === undefined ? 0 : isPapers ? 1 : !moduleId ? 1 : !subjectId ? 2 : 3;
 
   const isDark = useAppStore((s) => s.isDark);
   const isAdmin = useAppStore((s) => s.isAdmin);
@@ -231,12 +237,13 @@ export default function HubBrowse() {
     return Array.from(map.entries()).map(([sid, items]) => ({ subjectId: sid, count: distinctCount(items) }));
   }, [kind, level, outline, inBlock, moduleId]);
 
-  const topicRows = useMemo(() => {
-    if (level < 3) return [];
+  const topicRows = useMemo<{ name: string; key?: string; count: number }[]>(() => {
+    if (kind !== "papers" && level < 3) return [];
     if (kind === "mcqs") return topicCounts ?? [];
     const map = new Map<string, { name: string | null; items: HubEntry[] }>();
+    // Past Papers: every paper in the Block, grouped by subheading. Tests: narrowed to module + subject.
     inBlock
-      .filter((e) => e.moduleId === moduleId && e.subjectId === subjectId)
+      .filter((e) => kind === "papers" || (e.moduleId === moduleId && e.subjectId === subjectId))
       .forEach((e) => {
         const k = topicToKey(e.topic);
         const cur = map.get(k) ?? { name: e.topic, items: [] };
@@ -252,6 +259,11 @@ export default function HubBrowse() {
 
   // ---- Navigation helpers ----
   const openTopic = (name: string | null, key: string | null) => {
+    if (kind === "papers") {
+      if (blockNum === undefined) return;
+      navigate(`/past-papers/${blockNum}${key ? `?topic=${encodeURIComponent(key)}` : ""}`);
+      return;
+    }
     if (blockNum === undefined || !moduleId || !subjectId) return;
     if (kind === "mcqs") {
       if (!isSubjectOpen(blockNum, subjectId)) return goPaywall();
@@ -260,10 +272,6 @@ export default function HubBrowse() {
       const q = new URLSearchParams({ block: String(blockNum), module: moduleId, subject: subjectId });
       if (key) q.set("topic", key);
       navigate(`/tests?${q.toString()}`);
-    } else {
-      const q = new URLSearchParams({ module: moduleId });
-      if (key) q.set("topic", key);
-      navigate(`/past-papers/${blockNum}/${subjectId}?${q.toString()}`);
     }
   };
 
@@ -289,6 +297,15 @@ export default function HubBrowse() {
         onClick: () => navigate(`${base}/${b.block}`),
       }));
       return [r, info.title, "Choose a Block to continue.", "/", "Home"];
+    }
+    if (level === 1 && isPapers) {
+      const r: Row[] = topicRows.map((tp) => ({
+        key: tp.key ?? tp.name,
+        title: tp.name,
+        count: tp.count,
+        onClick: () => openTopic(null, tp.key ?? null),
+      }));
+      return [r, blockTitle, "Choose a Subheading.", base, info.title];
     }
     if (level === 1) {
       const r: Row[] = moduleList.map((m) => ({
@@ -318,13 +335,18 @@ export default function HubBrowse() {
       return [r, moduleName, "Choose a Subject.", `${base}/${blockNum}`, blockTitle];
     }
     const r: Row[] = topicRows.map((tp) => ({
-      key: "key" in tp ? tp.key : tp.name,
+      key: tp.key ?? tp.name,
       title: tp.name,
       count: tp.count,
-      onClick: () => openTopic(kind === "mcqs" ? tp.name : null, "key" in tp ? tp.key : null),
+      onClick: () => openTopic(kind === "mcqs" ? tp.name : null, tp.key ?? null),
     }));
     return [r, subjectLabel(subjectId!), "Choose a Subheading.", `${base}/${blockNum}/${moduleId}`, moduleName];
   })();
+
+  // ---- Old Module/Subject URLs for Past Papers: collapse onto the Block's Subheadings ----
+  if (isPapers && blockNum !== undefined && (moduleId || subjectId)) {
+    return <Navigate to={`/browse/papers/${blockNum}`} replace />;
+  }
 
   // ---- Invalid URL guards ----
   if (!isHubKind(kindParam) || (blockNum !== undefined && !Number.isInteger(blockNum))) {
@@ -344,7 +366,7 @@ export default function HubBrowse() {
   if (level >= 2) crumbs.push({ label: moduleName, to: `${base}/${blockNum}/${moduleId}` });
   if (level >= 3) crumbs.push({ label: subjectLabel(subjectId!), to: `${base}/${blockNum}/${moduleId}/${subjectId}` });
 
-  const levelNames = ["Blocks", "Modules", "Subjects", "Subheadings"];
+  const levelNames = isPapers ? ["Blocks", "Subheadings"] : ["Blocks", "Modules", "Subjects", "Subheadings"];
   const emptyText =
     level === 0
       ? "Nothing here yet."
@@ -542,7 +564,7 @@ export default function HubBrowse() {
                 )}
                 {level === 2 && r.subjectId && isSubjectId(r.subjectId) ? (
                   <SubjectIcon id={r.subjectId as SubjectId} color={accent} size={16} />
-                ) : level === 1 ? (
+                ) : level === 1 && !isPapers ? (
                   <Layers size={18} color={accent} />
                 ) : (
                   <FolderTree size={18} color={accent} />
