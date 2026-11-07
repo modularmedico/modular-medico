@@ -5,6 +5,7 @@ import Btn from "../Btn";
 import { FONT_DISPLAY } from "../../theme";
 import { THEME } from "../../theme";
 import { parseBracketFormat } from "../../utils/parseBracketFormat";
+import { SUBJECT_LIST, SUBJECT_META } from "../../data/subjects";
 import { updatePastPaper } from "../../services/pastPapers";
 import type { FirestorePastPaper, PastPaperMCQItem } from "../../types";
 
@@ -15,15 +16,13 @@ const TOTAL_BLOCKS = 15;
 interface Props {
   paper: FirestorePastPaper;
   t: Theme;
-  /** Subheadings already used in other papers — offered as suggestions so spelling stays consistent. */
-  knownSubheadings: string[];
   onClose: () => void;
   onNotice: (msg: string) => void;
 }
 
 const blankMcq = (): PastPaperMCQItem => ({ q: "", options: ["", "", "", ""], correct: 0, explanation: "" });
 
-export default function PastPaperEditor({ paper, t, knownSubheadings, onClose, onNotice }: Props) {
+export default function PastPaperEditor({ paper, t, onClose, onNotice }: Props) {
   const [title, setTitle] = useState(paper.title);
   const [description, setDescription] = useState(paper.description || "");
   const [driveUrl, setDriveUrl] = useState(paper.driveUrl || "");
@@ -122,7 +121,6 @@ export default function PastPaperEditor({ paper, t, knownSubheadings, onClose, o
     }
   };
 
-  const datalistId = `pp-subheadings-${paper.id}`;
 
   return (
     <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.purple}` }}>
@@ -154,21 +152,21 @@ export default function PastPaperEditor({ paper, t, knownSubheadings, onClose, o
           </select>
         </div>
         <div>
-          <label className={labelCls} style={{ color: t.textFaint }}>2 · Subheading</label>
-          <input
-            type="text"
-            list={datalistId}
+          <label className={labelCls} style={{ color: t.textFaint }}>2 · Subject</label>
+          <select
             value={topicName}
             onChange={(e) => setTopicName(e.target.value)}
-            placeholder="e.g. Heart"
             className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
             style={{ ...inputStyle, borderColor: topicName.trim() ? t.border : t.red }}
-          />
-          <datalist id={datalistId}>
-            {knownSubheadings.map((s) => (
-              <option key={s} value={s} />
+          >
+            <option value="">Select a subject</option>
+            {SUBJECT_LIST.map((id) => (
+              <option key={id} value={SUBJECT_META[id].label}>{SUBJECT_META[id].label}</option>
             ))}
-          </datalist>
+            {topicName.trim() && !SUBJECT_LIST.some((id) => SUBJECT_META[id].label === topicName) && (
+              <option value={topicName}>{topicName}</option>
+            )}
+          </select>
         </div>
       </div>
 

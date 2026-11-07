@@ -826,16 +826,6 @@ export default function AdminPanel() {
 
   const [editingPastPaperId, setEditingPastPaperId] = useState<string | null>(null);
 
-  // Subheadings already used under the chosen Block — offered as suggestions
-  // in the Add form so names stay consistent.
-  const knownPastPaperSubheadings = useMemo(() => {
-    const set = new Set<string>();
-    pastPapers.forEach((p) => {
-      if (p.block === pastPaperBlock && p.topicName?.trim()) set.add(p.topicName.trim());
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }, [pastPapers, pastPaperBlock]);
-
   const isPastPaperValid =
     pastPaperTopicName.trim().length > 0 &&
     (pastPaperInputMode === "drive" ? pastPaperDriveUrl.trim().length > 0 : validPastPaperMCQs.length > 0);
@@ -3834,7 +3824,7 @@ export default function AdminPanel() {
                 </span>
               </div>
               <span className="text-xs" style={{ color: t.textFaint }}>
-                Block &rarr; Module &rarr; Subject &rarr; Subheading
+                Block &rarr; Subject
               </span>
             </div>
 
@@ -3859,22 +3849,21 @@ export default function AdminPanel() {
 
               <div>
                 <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  2 &middot; Subheading
+                  2 &middot; Subject
                 </label>
-                <input
-                  type="text"
-                  list="past-paper-subheadings"
+                <select
                   value={pastPaperTopicName}
                   onChange={(e) => setPastPaperTopicName(e.target.value)}
-                  placeholder="e.g. Heart"
                   className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
-                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${pastPaperTopicName.trim() ? t.border : t.red}`, color: t.text }}
-                />
-                <datalist id="past-paper-subheadings">
-                  {knownPastPaperSubheadings.map((sh) => (
-                    <option key={sh} value={sh} />
+                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${pastPaperTopicName.trim() ? t.border : t.red}`, color: pastPaperTopicName.trim() ? t.text : t.textFaint }}
+                >
+                  <option value="" style={{ backgroundColor: t.surface, color: t.textFaint }}>Select a subject</option>
+                  {SUBJECT_LIST.map((id) => (
+                    <option key={id} value={SUBJECT_META[id].label} style={{ backgroundColor: t.surface, color: t.text }}>
+                      {SUBJECT_META[id].label}
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </div>
             </div>
 
@@ -3882,7 +3871,7 @@ export default function AdminPanel() {
             <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt }}>
               <span className="font-bold" style={{ color: t.textMuted }}>Adding to:</span>
               <Pill t={t} tone="teal">Block {pastPaperBlock}</Pill>
-              <Pill t={t} tone="green">{pastPaperTopicName.trim() || "— enter a subheading"}</Pill>
+              <Pill t={t} tone="green">{pastPaperTopicName.trim() || "— pick a subject"}</Pill>
             </div>
           </Card>
 
@@ -4125,7 +4114,6 @@ export default function AdminPanel() {
                   key={p.id}
                   paper={p}
                   t={t}
-                  knownSubheadings={Array.from(new Set(pastPapers.filter((x) => x.block === p.block).map((x) => (x.topicName || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))}
                   onClose={() => setEditingPastPaperId(null)}
                   onNotice={(msg) => {
                     setActionNotice(msg);
