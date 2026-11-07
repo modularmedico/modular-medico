@@ -801,7 +801,6 @@ export default function AdminPanel() {
 
   const [pastPaperBlock, setPastPaperBlock] = useState<number>(1);
   const [pastPaperTopicName, setPastPaperTopicName] = useState<string>("");
-  const [pastPaperTitle, setPastPaperTitle] = useState("");
   const [pastPaperDriveUrl, setPastPaperDriveUrl] = useState("");
   const [pastPaperDescription, setPastPaperDescription] = useState("");
   const [pastPaperPublishImmediately, setPastPaperPublishImmediately] = useState(true);
@@ -839,14 +838,13 @@ export default function AdminPanel() {
 
   const isPastPaperValid =
     pastPaperTopicName.trim().length > 0 &&
-    pastPaperTitle.trim().length > 0 &&
     (pastPaperInputMode === "drive" ? pastPaperDriveUrl.trim().length > 0 : validPastPaperMCQs.length > 0);
 
   const handleSavePastPaper = async () => {
     if (!isPastPaperValid) return;
     try {
       const result = await addPastPaper({
-        title: pastPaperTitle.trim(),
+        title: pastPaperTopicName.trim(),
         ...(pastPaperInputMode === "drive"
           ? { driveUrl: pastPaperDriveUrl.trim() }
           : {
@@ -871,7 +869,6 @@ export default function AdminPanel() {
         setPastPaperSaveWarning(result.message);
         setTimeout(() => setPastPaperSaveStatus(null), 9000);
       }
-      setPastPaperTitle("");
       setPastPaperDriveUrl("");
       setPastPaperDescription("");
       setPastPaperBracketText("");
@@ -3924,20 +3921,6 @@ export default function AdminPanel() {
             </div>
 
             <div className="flex flex-col gap-4">
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
-                  Paper Title
-                </label>
-                <input
-                  type="text"
-                  value={pastPaperTitle}
-                  onChange={(e) => setPastPaperTitle(e.target.value)}
-                  placeholder="e.g. Block 3 Final Term Paper 2024"
-                  className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold outline-none"
-                  style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, color: t.text }}
-                />
-              </div>
-
               {pastPaperInputMode === "drive" ? (
                 <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider" style={{ color: t.textFaint }}>
