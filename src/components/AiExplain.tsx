@@ -53,12 +53,12 @@ export default function AiExplain({ question, options, correct, selected, explan
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.answer) {
-        const hint =
+        setError(
           data?.error ||
-          (res.status === 404
-            ? "The AI endpoint (/api/ai-explain) wasn't found. It only works on the deployed Vercel site (or via `vercel dev`), not plain `npm run dev`."
-            : `Couldn't get an AI explanation right now (HTTP ${res.status}). Please try again.`);
-        setError(hint);
+            (res.status === 404
+              ? "The AI endpoint (/api/ai-explain) wasn't found. It only works on the deployed Vercel site (or via `vercel dev`), not plain `npm run dev`."
+              : `Couldn't get an AI explanation right now (HTTP ${res.status}). Please try again.`)
+        );
       } else setAnswer(data.answer);
     } catch {
       setError("Network error — check your connection and try again.");

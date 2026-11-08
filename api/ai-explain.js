@@ -43,10 +43,34 @@ const MODE_INSTRUCTIONS = {
     "medical student preparing for exams.",
 };
 
-const MAX_MODEL_ATTEMPTS = 4;
-const PER_MODEL_TIMEOUT_MS = 9000; // 5s catalog + 4 x 9s = 41s, under the 60s maxDuration in vercel.json
+// Free OpenRouter models are frequently rate-limited or slow, so instead of trying them
+// one at a time we race a small batch in parallel and take the first good answer.
+// Worst case: 3s catalog lookup + 2 waves x 12s = 27s, under the 30s maxDuration in vercel.json.
+const WAVE_SIZE = 3;
+const MAX_WAVES = 2;
+const WAVE_TIMEOUT_MS = 12000;
 
 export default async function handler(req, res) {
+  // Diagnostic: open /api/ai-explain in a browser (GET) to see what's wrong. Never reveals the key.
+  if (req.method === "GET") {
+    const key = process.env.OPENROUTER_API_KEY;
+    const report = { endpointDeployed: true, keySet: Boolean(key), keyValid: null, freeModelsFound: null, pinnedModel: process.env.OPENROUTER_MODEL || null };
+    if (key) {
+      try {
+        const k = await fetch("https://openrouter.ai/api/v1/auth/key", { headers: { Authorization: `Bearer ${key}` } });
+        report.keyValid = k.ok;
+        report.keyCheckStatus = k.status;
+      } catch (e) {
+        report.keyCheckError = e && e.message ? e.message : "request failed";
+      }
+      report.freeModelsFound = (await getModelCandidates(key)).length;
+    } else {
+      report.hint = "OPENROUTER_API_KEY is not set for this deployment. Add it in Vercel > Settings > Environment Variables (Production), then redeploy.";
+    }
+    res.status(200).json(report);
+    return;
+  }
+
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
     return;
@@ -99,22 +123,19 @@ export default async function handler(req, res) {
     `with the explanation itself, as if speaking straight to the student. Respond in plain text ` +
     `only - no markdown symbols like asterisks, hashes, or bullet dashes.`;
 
-  const modelsToTry = (await getModelCandidates(apiKey)).slice(0, MAX_MODEL_ATTEMPTS);
+  const apiKeyHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+    "HTTP-Referer": "https://modular-medico.vercel.app",
+    "X-Title": "Modular Medico - AI Explain",
+  };
 
-  let lastError = "Unknown error";
-  for (const model of modelsToTry) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), PER_MODEL_TIMEOUT_MS);
-
-      const callModel = (withReasoning) => fetch("https://openrouter.ai/api/v1/chat/completions", {
+  // Calls one model; resolves with the cleaned answer, or rejects with a short reason.
+  const callModel = async (model, signal) => {
+    const send = (withReasoning) =>
+      fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-          "HTTP-Referer": "https://modular-medico.vercel.app",
-          "X-Title": "Modular Medico - AI Explain",
-        },
+        headers: apiKeyHeaders,
         body: JSON.stringify({
           model,
           messages: [
@@ -123,38 +144,64 @@ export default async function handler(req, res) {
           ],
           temperature: mode === "mnemonic" ? 0.9 : 0.6,
           max_tokens: mode === "depth" ? 650 : 320,
-          // Ask OpenRouter to strip any chain-of-thought/reasoning tokens the
-          // underlying model produces, so only the final answer comes back.
+          // Ask OpenRouter to strip chain-of-thought tokens so only the final answer comes back.
           ...(withReasoning ? { reasoning: { exclude: true } } : {}),
         }),
-        signal: controller.signal,
+        signal,
       });
-      let r = await callModel(true);
-      if (r.status === 400) r = await callModel(false);
-      clearTimeout(timeout);
 
-      if (!r.ok) {
-        lastError = `${model}: HTTP ${r.status}`;
-        continue; // try the next free model
-      }
+    let r = await send(true);
+    if (r.status === 400) r = await send(false); // some providers reject the reasoning option
+    if (!r.ok) throw new Error(`${model}: HTTP ${r.status}`);
 
-      const data = await r.json();
-      const raw = data?.choices?.[0]?.message?.content?.trim();
-      const text = raw ? cleanExplanation(raw) : "";
+    const data = await r.json();
+    const raw = data?.choices?.[0]?.message?.content?.trim();
+    const text = raw ? cleanExplanation(raw) : "";
+    if (!text) throw new Error(`${model}: empty response`);
+    if (looksLikeLeakedReasoning(text)) throw new Error(`${model}: response looked like leaked reasoning`);
+    return { answer: text, model };
+  };
 
-      if (text && !looksLikeLeakedReasoning(text)) {
-        res.status(200).json({ answer: text, model });
-        return;
-      }
-      lastError = text ? `${model}: response looked like leaked reasoning` : `${model}: empty response`;
-    } catch (err) {
-      lastError = `${model}: ${err && err.message ? err.message : "request failed"}`;
+  // OPENROUTER_MODEL (optional env var) pins a preferred model, tried first. Useful if you
+  // add credits and want a faster/more reliable paid model than the free pool.
+  const pinned = (process.env.OPENROUTER_MODEL || "").trim();
+  const candidates = await getModelCandidates(apiKey);
+  const ordered = pinned ? [pinned, ...candidates.filter((m) => m !== pinned)] : candidates;
+
+  const failures = [];
+  for (let wave = 0; wave < MAX_WAVES; wave++) {
+    const batch = ordered.slice(wave * WAVE_SIZE, (wave + 1) * WAVE_SIZE);
+    if (batch.length === 0) break;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), WAVE_TIMEOUT_MS);
+    try {
+      const winner = await Promise.any(
+        batch.map((m) =>
+          callModel(m, controller.signal).catch((e) => {
+            failures.push(e && e.message ? e.message : `${m}: request failed`);
+            throw e;
+          })
+        )
+      );
+      controller.abort(); // cancel the slower models in this wave
+      res.status(200).json(winner);
+      return;
+    } catch {
+      /* every model in this wave failed — try the next wave */
+    } finally {
+      clearTimeout(timer);
     }
   }
 
-  res.status(502).json({
-    error: `All free AI models are busy or rate-limited right now. Please try again in a moment. (${lastError})`,
-  });
+  const authProblem = failures.some((f) => /HTTP (401|403)/.test(f));
+  const creditProblem = failures.some((f) => /HTTP 402/.test(f));
+  const message = authProblem
+    ? "The OpenRouter API key was rejected (HTTP 401/403). Check OPENROUTER_API_KEY in Vercel and redeploy."
+    : creditProblem
+    ? "OpenRouter says this key has no credits for that model (HTTP 402). Try again or add credits."
+    : "All free AI models are busy or rate-limited right now. Please try again in a moment.";
+  res.status(502).json({ error: `${message} (${failures.slice(-3).join("; ") || "no models available"})` });
 }
 
 /**
