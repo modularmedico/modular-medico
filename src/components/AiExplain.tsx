@@ -51,9 +51,15 @@ export default function AiExplain({ question, options, correct, selected, explan
           mode: m,
         }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) setError(data?.error || "Couldn't get an AI explanation right now. Please try again.");
-      else setAnswer(data.answer);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.answer) {
+        const hint =
+          data?.error ||
+          (res.status === 404
+            ? "The AI endpoint (/api/ai-explain) wasn't found. It only works on the deployed Vercel site (or via `vercel dev`), not plain `npm run dev`."
+            : `Couldn't get an AI explanation right now (HTTP ${res.status}). Please try again.`);
+        setError(hint);
+      } else setAnswer(data.answer);
     } catch {
       setError("Network error — check your connection and try again.");
     } finally {
@@ -83,7 +89,7 @@ export default function AiExplain({ question, options, correct, selected, explan
         </button>
         {menuOpen && (
           <div
-            className="absolute left-0 top-full z-30 mt-1.5 w-60 overflow-hidden rounded-2xl shadow-lg"
+            className="absolute left-0 top-full z-[60] mt-1.5 w-60 overflow-hidden rounded-2xl shadow-lg"
             style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}
           >
             {AI_MODE_OPTIONS.map(({ mode: m, label, icon: Icon }) => (
@@ -101,7 +107,7 @@ export default function AiExplain({ question, options, correct, selected, explan
       </div>
 
       {mode && current && (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 md:items-center md:p-4" onClick={close}>
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 p-0 md:items-center md:p-4" onClick={close}>
           <div
             onClick={(e) => e.stopPropagation()}
             className="max-h-[80vh] w-full overflow-y-auto rounded-t-3xl p-5 md:max-w-lg md:rounded-3xl"

@@ -44,7 +44,7 @@ const MODE_INSTRUCTIONS = {
 };
 
 const MAX_MODEL_ATTEMPTS = 4;
-const PER_MODEL_TIMEOUT_MS = 9000;
+const PER_MODEL_TIMEOUT_MS = 9000; // 5s catalog + 4 x 9s = 41s, under the 60s maxDuration in vercel.json
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -107,7 +107,7 @@ export default async function handler(req, res) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), PER_MODEL_TIMEOUT_MS);
 
-      const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const callModel = (withReasoning) => fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -125,10 +125,12 @@ export default async function handler(req, res) {
           max_tokens: mode === "depth" ? 650 : 320,
           // Ask OpenRouter to strip any chain-of-thought/reasoning tokens the
           // underlying model produces, so only the final answer comes back.
-          reasoning: { exclude: true },
+          ...(withReasoning ? { reasoning: { exclude: true } } : {}),
         }),
         signal: controller.signal,
       });
+      let r = await callModel(true);
+      if (r.status === 400) r = await callModel(false);
       clearTimeout(timeout);
 
       if (!r.ok) {

@@ -4,10 +4,10 @@
   "framework": "vite",
   "functions": {
     "api/ai-explain.js": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/firebase-usage.js": {
-      "maxDuration": 30
+      "maxDuration": 60
     }
   },
   "rewrites": [
