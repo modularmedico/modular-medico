@@ -31,6 +31,7 @@ import { subscribeFreeBlocks, subscribeFreeSubjects, subscribeTestSeriesAccess }
 import { useAppStore } from "./store/useAppStore";
 import { initAnalytics } from "./firebase";
 import { trackVisit } from "./services/siteStats";
+import { prefetchWhenIdle } from "./utils/localCache";
 
 // Blocks direct access to /admin. Anyone who isn't already unlocked (via the
 // admin-gate password screen) gets bounced to /admin-gate instead of seeing the panel.
@@ -60,6 +61,13 @@ export default function App() {
     // Records one visit for this browser session (see services/siteStats.ts).
     // Best-effort and silent — never blocks or affects the rest of the app.
     trackVisit();
+    // Pre-download the screens students open next, while the browser is idle, so tapping
+    // "Practice" never waits on a code chunk as well as on data.
+    prefetchWhenIdle(() => {
+      import("./pages/HubBrowse");
+      import("./pages/PracticeSetup");
+      import("./pages/Practice");
+    }, 4000);
   }, []);
 
   // Keep which Blocks are free live for the lifetime of the app, so an

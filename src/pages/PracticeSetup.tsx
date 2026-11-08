@@ -25,6 +25,10 @@ import {
   subscribeBlockDefinitions,
   subscribeTopics,
   fetchPublishedBlock,
+  subscribeBlockIndex,
+  prefetchSubjectQuestions,
+  topicIndexKey,
+  type BlockIndex,
   fetchPublishedBlockExam,
   fetchPublishedModuleExam,
 } from "../services/adminContent";
@@ -64,6 +68,7 @@ export default function PracticeSetup() {
   const [showInfo, setShowInfo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [count, setCount] = useState<number | null>(null);
+  const [blockIndex, setBlockIndex] = useState<BlockIndex | null>(null);
 
   // Topic picker — 4th tier of the hierarchy (Block -> Module -> Subject -> Topic).
   // Only relevant when practicing a single Subject within a single Module. We select by
@@ -148,22 +153,21 @@ export default function PracticeSetup() {
       if (docs.length > 0) setTopicsLoaded(true);
     });
 
-    fetchPublishedBlock(subjectId, moduleId, block).then((qs) => {
+    // Subheading names come from the slim per-block index (instant, tiny) instead of
+    // downloading every full question just to read their tags.
+    const unsubIndex = subscribeBlockIndex(block, (idx) => {
       if (cancelled) return;
-      const names = new Set<string>();
-      qs.forEach((q) => {
-        // Also pick up legacy questions tagged only with `subheadingName`
-        // from before MCQ topics had their own collection.
-        const name = (q.topicName || q.subheadingName || "").trim();
-        if (name) names.add(name);
-      });
-      setTopicNamesFromQuestions(Array.from(names));
+      setTopicNamesFromQuestions((idx.topics[topicIndexKey(moduleId, subjectId)] ?? []).map((x) => x.name));
+      setBlockIndex(idx);
       setTopicsLoaded(true);
     });
+    // Meanwhile start downloading the real questions so "Start" is instant when tapped.
+    prefetchSubjectQuestions(subjectId, moduleId, block);
 
     return () => {
       cancelled = true;
       unsubDocs();
+      unsubIndex();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSubjectInModule, block, moduleId, subjectId]);
@@ -323,10 +327,13 @@ export default function PracticeSetup() {
         if (mode === "exam") setTimerSeconds(qs.length * 60);
       });
     } else if (isSubjectInModule) {
-      fetchPublishedBlock(subjectId, moduleId, block, undefined, null, selectedTopicName || null).then((qs) => {
-        setCount(qs.length);
-        if (mode === "exam") setTimerSeconds(qs.length * 60);
-      });
+      if (!blockIndex) return; // slim index not here yet — the effect re-runs when it arrives
+      const subj = blockIndex.outline.modules.find((m) => m.id === moduleId)?.subjects.find((x) => x.subjectId === subjectId);
+      const n = selectedTopicName
+        ? (blockIndex.topics[topicIndexKey(moduleId, subjectId)] ?? []).find((x) => x.name === selectedTopicName)?.count ?? 0
+        : subj?.count ?? 0;
+      setCount(n);
+      if (mode === "exam") setTimerSeconds(n * 60);
     }
   }, [
     locked,
@@ -340,6 +347,7 @@ export default function PracticeSetup() {
     selectedTopicName,
     selectedModuleTopic,
     selectedBlockTopics,
+    blockIndex,
   ]);
 
   if (!Number.isInteger(block) || (!isFullBlock && !isModuleExam && !isSubjectInModule)) {

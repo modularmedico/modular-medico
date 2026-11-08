@@ -16,7 +16,6 @@ import {
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
-import Spinner from "../components/Spinner";
 import SubjectIcon from "../components/SubjectIcon";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import { useAppStore, useCanAccessTestSeries, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
@@ -24,9 +23,11 @@ import { DEFAULT_BLOCK_DEFINITIONS, isSubjectId, type SubjectId } from "../data/
 import {
   subscribeBlockCounts,
   subscribeBlockDefinitions,
-  subscribeBlockOutline,
-  fetchPublishedBlock,
-  type BlockOutline,
+  subscribeBlockIndex,
+  prefetchBlockIndex,
+  prefetchSubjectQuestions,
+  topicIndexKey,
+  type BlockIndex,
 } from "../services/adminContent";
 import { subscribePublishedPastPapers } from "../services/pastPapers";
 import { subscribePublishedTestSessions } from "../services/testSessions";
@@ -61,7 +62,8 @@ interface Row {
   key: string;
   title: string;
   subtitle?: string;
-  count: number;
+  /** null = still loading (shows no number instead of a misleading 0). */
+  count: number | null;
   subjectId?: string;
   locked?: boolean;
   free?: boolean;
@@ -147,36 +149,67 @@ export default function HubBrowse() {
     return subscribeBlockCounts(blocks, setBlockCounts);
   }, [kind, level, blockKey]);
 
-  const [outline, setOutline] = useState<BlockOutline | null>(null);
+  // One slim download per block feeds levels 1-3 (modules, subjects AND subheading counts), so
+  // drilling deeper is instant — it no longer re-downloads the full questions at every level.
+  const [index, setIndex] = useState<BlockIndex | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [slow, setSlow] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    setOutline(null);
+    setIndex(null);
+    setLoadError(false);
+    setSlow(false);
     if (kind !== "mcqs" || blockNum === undefined || !Number.isInteger(blockNum)) return;
-    return subscribeBlockOutline(blockNum, setOutline);
-  }, [kind, blockNum]);
-
-  // ---- MCQs level 3: subheading (topic) names with question counts ----
-  const [topicCounts, setTopicCounts] = useState<{ name: string; count: number }[] | null>(null);
-  useEffect(() => {
-    setTopicCounts(null);
-    if (kind !== "mcqs" || level !== 3 || !subjectId || !moduleId || blockNum === undefined) return;
-    let cancelled = false;
-    fetchPublishedBlock(subjectId, moduleId, blockNum).then((qs) => {
-      if (cancelled) return;
-      const map = new Map<string, number>();
-      qs.forEach((q) => {
-        const name = (q.topicName || q.subheadingName || "").trim();
-        if (name) map.set(name, (map.get(name) || 0) + 1);
-      });
-      setTopicCounts(
-        Array.from(map.entries())
-          .map(([name, count]) => ({ name, count }))
-          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
-      );
-    });
+    // If the first paint takes a while, say so (people leave when they think the app froze).
+    const slowTimer = setTimeout(() => setSlow(true), 6000);
+    const unsub = subscribeBlockIndex(
+      blockNum,
+      (i) => {
+        clearTimeout(slowTimer);
+        setIndex(i);
+      },
+      undefined,
+      () => {
+        clearTimeout(slowTimer);
+        setLoadError(true);
+      }
+    );
     return () => {
-      cancelled = true;
+      clearTimeout(slowTimer);
+      unsub();
     };
-  }, [kind, level, subjectId, moduleId, blockNum]);
+  }, [kind, blockNum, attempt]);
+  const outline = index?.outline ?? null;
+  const topicCounts = useMemo(
+    () => (level === 3 && index && moduleId && subjectId ? index.topics[topicIndexKey(moduleId, subjectId)] ?? [] : null),
+    [level, index, moduleId, subjectId]
+  );
+
+  // Warm the next step: while the student is on the subheading list, quietly pre-load the real
+  // questions for that subject so tapping a subheading starts practice immediately.
+  useEffect(() => {
+    if (kind !== "mcqs" || level !== 3 || blockNum === undefined || !moduleId || !subjectId) return;
+    if (!isSubjectOpen(blockNum, subjectId)) return;
+    prefetchSubjectQuestions(subjectId, moduleId, blockNum);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, level, blockNum, moduleId, subjectId]);
+
+  // Blocks screen: remember the last block, and pre-load it (plus whatever the student is about
+  // to tap) while the device is idle.
+  useEffect(() => {
+    if (kind !== "mcqs" || level !== 0) return;
+    const last = Number(localStorage.getItem("mm_last_block"));
+    if (Number.isInteger(last) && last > 0) prefetchBlockIndex(last);
+  }, [kind, level]);
+  useEffect(() => {
+    if (kind === "mcqs" && blockNum !== undefined && Number.isInteger(blockNum)) {
+      try {
+        localStorage.setItem("mm_last_block", String(blockNum));
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [kind, blockNum]);
 
   const base = `/browse/${kind}`;
   const blockDef = blockDefs.find((b) => b.block === blockNum);
@@ -188,10 +221,10 @@ export default function HubBrowse() {
     kind !== "mcqs"
       ? entriesLoaded
       : level === 0
-      ? blockCounts !== null
+      ? true // tiles come from block definitions; counts fill in when they arrive
       : level === 3
-      ? topicCounts !== null && outline !== null
-      : outline !== null;
+      ? index !== null
+      : index !== null;
 
   const inBlock = useMemo(() => entries.filter((e) => e.block === blockNum), [entries, blockNum]);
 
@@ -255,7 +288,7 @@ export default function HubBrowse() {
       .sort((a, b) => (a.key === "__general" ? 1 : b.key === "__general" ? -1 : a.name.localeCompare(b.name, undefined, { numeric: true })));
   }, [kind, level, topicCounts, inBlock, moduleId, subjectId]);
 
-  const countLabel = (n: number) => (kind === "mcqs" ? `${n} Qs` : `${n} ${n === 1 ? info.unit : info.units}`);
+  const countLabel = (n: number | null) => n === null ? "" : (kind === "mcqs" ? `${n} Qs` : `${n} ${n === 1 ? info.unit : info.units}`);
 
   // ---- Navigation helpers ----
   const openTopic = (name: string | null, key: string | null) => {
@@ -291,7 +324,7 @@ export default function HubBrowse() {
         subtitle: b.title.split(" ")[0],
         count:
           kind === "mcqs"
-            ? blockCounts?.[b.block] ?? 0
+            ? blockCounts ? blockCounts[b.block] ?? 0 : null
             : distinctCount(entries.filter((e) => e.block === b.block)),
         locked: kind === "mcqs" && isBlockBadgeLocked(b.block),
         onClick: () => navigate(`${base}/${b.block}`),
@@ -482,12 +515,41 @@ export default function HubBrowse() {
         </Card>
       )}
 
-      {!(kind === "tests" && !canAccessTests) && !loaded && (
+      {kind === "mcqs" && loadError && !loaded && (
         <div
-          className="flex flex-col items-center justify-center gap-3 rounded-2xl p-10 text-center"
+          className="flex flex-col items-center justify-center gap-3 rounded-2xl p-8 text-center"
           style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
         >
-          <Spinner t={t} size={22} label={`Loading ${levelNames[level].toLowerCase()}\u2026`} />
+          <p style={{ color: t.textMuted, fontSize: 13 }}>
+            Couldn&apos;t load this block. Check your connection and try again.
+          </p>
+          <Btn t={t} onClick={() => setAttempt((n) => n + 1)}>
+            Retry
+          </Btn>
+        </div>
+      )}
+
+      {kind === "mcqs" && slow && !loaded && !loadError && (
+        <p className="text-center text-xs" style={{ color: t.textFaint }}>
+          Slow connection — still loading. This only happens the first time; next visits are instant.
+        </p>
+      )}
+
+      {!(kind === "tests" && !canAccessTests) && !loaded && !loadError && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label={`Loading ${levelNames[level].toLowerCase()}`}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              className="flex animate-pulse items-center gap-4 rounded-2xl p-4"
+              style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, animationDelay: `${i * 80}ms` }}
+            >
+              <div className="h-12 w-12 shrink-0 rounded-2xl" style={{ backgroundColor: `${accent}22` }} />
+              <div className="flex-1 space-y-2">
+                <div className="h-3.5 w-2/3 rounded" style={{ backgroundColor: t.border }} />
+                <div className="h-2.5 w-1/3 rounded" style={{ backgroundColor: t.border }} />
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -511,6 +573,9 @@ export default function HubBrowse() {
             <button
               key={r.key}
               onClick={r.onClick}
+              onPointerEnter={() => kind === "mcqs" && prefetchBlockIndex(Number(r.key))}
+              onTouchStart={() => kind === "mcqs" && prefetchBlockIndex(Number(r.key))}
+              onFocus={() => kind === "mcqs" && prefetchBlockIndex(Number(r.key))}
               className="relative flex flex-col items-center justify-center rounded-2xl p-2.5 text-center transition-all hover:scale-[1.02]"
               style={{
                 backgroundColor: t.surfaceAlt,

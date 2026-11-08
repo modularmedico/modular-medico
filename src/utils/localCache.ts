@@ -23,6 +23,8 @@ const MAX_STALE = 7 * ONE_DAY;
 interface CacheEnvelope<T> {
   value: T;
   expiresAt: number;
+  /** When this value was stored — lets callers skip a network refresh for recent entries. */
+  savedAt?: number;
 }
 
 // In-memory tier: survives route changes within a session, needs no JSON parse, and
@@ -63,7 +65,7 @@ export function cacheGet<T>(key: string): T | null {
 
 /** Writes a value to the cache with a TTL (defaults to 1 day). */
 export function cacheSet<T>(key: string, value: T, ttlMs: number = ONE_DAY): void {
-  const envelope: CacheEnvelope<T> = { value, expiresAt: Date.now() + ttlMs };
+  const envelope: CacheEnvelope<T> = { value, expiresAt: Date.now() + ttlMs, savedAt: Date.now() };
   mem.set(key, envelope);
   try {
     localStorage.setItem(PREFIX + key, JSON.stringify(envelope));
@@ -167,20 +169,46 @@ export function cacheThenFetch<T>(
   fetcher: () => Promise<T>,
   cb: (data: T) => void,
   fallback?: () => T,
-  ttlMs: number = 7 * ONE_DAY
+  ttlMs: number = 7 * ONE_DAY,
+  /**
+   * If the cached value was saved less than this many ms ago, trust it and skip the network
+   * entirely. Without this, every visit re-downloaded data that was fetched seconds ago.
+   */
+  freshMs: number = 0,
+  /** Called when the fetch fails and there was no cached value to show (lets the UI offer Retry). */
+  onError?: (err: unknown) => void
 ): () => void {
   let cancelled = false;
   const cached = cacheGet<T>(key);
-  if (cached !== null) cb(cached);
+  if (cached !== null) {
+    cb(cached);
+    const savedAt = readEnvelope<T>(key)?.savedAt ?? 0;
+    if (freshMs > 0 && Date.now() - savedAt < freshMs) return () => {};
+  }
   dedupedFetch(key, fetcher, ttlMs)
     .then((fresh) => {
       if (!cancelled) cb(fresh);
     })
     .catch((err) => {
       console.warn(`cacheThenFetch(${key}) failed:`, err);
-      if (!cancelled && cached === null && fallback) cb(fallback());
+      if (cancelled || cached !== null) return;
+      if (onError) onError(err);
+      else if (fallback) cb(fallback());
     });
   return () => {
     cancelled = true;
   };
+}
+
+/**
+ * Fire-and-forget warm-up: runs the loader at idle time so the data is already cached when the
+ * student taps. Skipped on Data Saver / 2G connections so we never burn a student's data.
+ */
+export function prefetchWhenIdle(task: () => void, timeoutMs = 1500): void {
+  const conn = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  if (conn?.saveData || conn?.effectiveType === "2g" || conn?.effectiveType === "slow-2g") return;
+  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number })
+    .requestIdleCallback;
+  if (ric) ric(task, { timeout: timeoutMs });
+  else setTimeout(task, 300);
 }

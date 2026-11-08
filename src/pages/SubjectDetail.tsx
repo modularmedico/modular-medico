@@ -4,7 +4,6 @@ import { ChevronLeft, Lock, Crown, Layers, ArrowRight, FolderTree } from "lucide
 import Card from "../components/Card";
 import Btn from "../components/Btn";
 import SubjectIcon from "../components/SubjectIcon";
-import Spinner from "../components/Spinner";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import {
@@ -14,13 +13,7 @@ import {
   type SubjectId,
   type BlockDefinition,
 } from "../data/subjects";
-import {
-  subscribeBlockDefinitions,
-  subscribeCurriculumCounts,
-  subscribePublishedQuestions,
-  type CurriculumCounts,
-} from "../services/adminContent";
-import type { FirestoreQuestion } from "../types";
+import { subscribeBlockDefinitions, subscribeSubjectModules, type SubjectModuleRow } from "../services/adminContent";
 
 export default function SubjectDetail() {
   const navigate = useNavigate();
@@ -39,25 +32,25 @@ export default function SubjectDetail() {
     isBlockUnlocked(block) || !!freeSubjects[block]?.includes(subject);
   const t = isDark ? THEME.dark : THEME.light;
   const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
-  const [allQuestions, setAllQuestions] = useState<FirestoreQuestion[]>([]);
+  const [rows, setRows] = useState<SubjectModuleRow[]>([]);
   const [questionsLoaded, setQuestionsLoaded] = useState(false);
-  const [counts, setCounts] = useState<CurriculumCounts>({
-    blockCounts: {},
-    moduleCounts: {},
-    subjectInModuleCounts: {},
-    subjectTotalCounts: {},
-  });
+  const [loadError, setLoadError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => subscribeBlockDefinitions(setBlockDefs), []);
-  useEffect(() => subscribeCurriculumCounts(setCounts), []);
-  useEffect(
-    () =>
-      subscribePublishedQuestions((qs) => {
-        setAllQuestions(qs);
+  // One slim, cached request for THIS subject only (was: the whole published bank, live).
+  useEffect(() => {
+    setQuestionsLoaded(false);
+    setLoadError(false);
+    return subscribeSubjectModules(
+      subjectId,
+      (r) => {
+        setRows(r);
         setQuestionsLoaded(true);
-      }),
-    []
-  );
+      },
+      () => setLoadError(true)
+    );
+  }, [subjectId, attempt]);
 
   if (!(SUBJECT_LIST as readonly string[]).includes(subjectId)) {
     return (
@@ -82,37 +75,26 @@ export default function SubjectDetail() {
     locked: boolean;
   }> = [];
 
-  const seenModuleKeys = new Set<string>();
-  allQuestions
-    .filter((q) => q.subjectId === subjectId && q.status === "published")
-    .forEach((q) => {
-      const modId = q.moduleId || q.moduleName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const key = `${q.block}-${modId}`;
-      if (seenModuleKeys.has(key)) return;
-      seenModuleKeys.add(key);
-
-      const blockDef = blockDefs.find((b) => b.block === q.block);
-      const count = counts.subjectInModuleCounts[`${q.block}-${modId}-${subjectId}`] || 0;
-      const locked = !isSubjectOpen(q.block, subjectId);
-
-      moduleAppearances.push({
-        block:
-          blockDef || {
-            block: q.block,
-            title: `Block ${q.block}`,
-            year: "",
-            description: "",
-            modules: [],
-          },
-        module: { id: modId, name: q.moduleName || "General Module" },
-        questionCount: count,
-        locked,
-      });
+  rows.forEach((r) => {
+    const blockDef = blockDefs.find((b) => b.block === r.block);
+    moduleAppearances.push({
+      block:
+        blockDef || {
+          block: r.block,
+          title: `Block ${r.block}`,
+          year: "",
+          description: "",
+          modules: [],
+        },
+      module: { id: r.moduleId, name: r.moduleName },
+      questionCount: r.count,
+      locked: !isSubjectOpen(r.block, subjectId),
     });
+  });
 
   moduleAppearances.sort((a, b) => a.block.block - b.block.block);
 
-  const totalSubjectQuestions = counts.subjectTotalCounts[subjectId] || 0;
+  const totalSubjectQuestions = rows.reduce((n, r) => n + r.count, 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -178,12 +160,27 @@ export default function SubjectDetail() {
           </div>
         </div>
 
-        {!questionsLoaded && (
+        {loadError && !questionsLoaded && (
           <div
-            className="flex flex-col items-center justify-center gap-3 rounded-2xl p-10 text-center"
+            className="flex flex-col items-center justify-center gap-3 rounded-2xl p-8 text-center"
             style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
           >
-            <Spinner t={t} size={22} label="Loading modules\u2026" />
+            <p style={{ color: t.textMuted, fontSize: 13 }}>Couldn&apos;t load modules. Check your connection and try again.</p>
+            <Btn t={t} onClick={() => setAttempt((n) => n + 1)}>
+              Retry
+            </Btn>
+          </div>
+        )}
+
+        {!questionsLoaded && !loadError && (
+          <div className="grid gap-4 sm:grid-cols-2" aria-busy="true">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-36 animate-pulse rounded-2xl"
+                style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}`, animationDelay: `${i * 80}ms` }}
+              />
+            ))}
           </div>
         )}
 

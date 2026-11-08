@@ -11,7 +11,7 @@ interface Props {
 }
 
 /** A circular spinning loading indicator, for use anywhere content is being fetched from the backend. */
-export default function Spinner({ t, size = 20, color, label, className = "", hint = true }: Props) {
+export default function Spinner({ t, size = 20, color, label, className = "", hint = false }: Props) {
   return (
     <div className={`flex flex-col items-center justify-center gap-2 ${className}`}>
       <div className="flex items-center justify-center gap-2">
