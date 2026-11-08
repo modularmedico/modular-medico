@@ -142,9 +142,9 @@ export default function PastPaperList() {
                 <FileStack size={18} color={t.gold} />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-bold">{p.title}</div>
+                <div className="truncate text-sm font-bold">{p.description || p.title}</div>
                 {p.description && (
-                  <div className="truncate text-[11px]" style={{ color: t.textFaint }}>{p.description}</div>
+                  <div className="truncate text-[11px]" style={{ color: t.textFaint }}>{p.title}</div>
                 )}
                 {p.mcqs && p.mcqs.length > 0 && (
                   <div className="truncate text-[11px] font-semibold" style={{ color: t.teal }}>
@@ -163,10 +163,10 @@ export default function PastPaperList() {
           <div className="flex items-start justify-between gap-3 p-4" style={{ borderBottom: `1.5px solid ${t.border}` }}>
             <div className="min-w-0">
               <h3 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }} className="truncate">
-                {activePaper.title}
+                {activePaper.description || activePaper.title}
               </h3>
               {activePaper.description && (
-                <p className="mt-1 truncate text-xs" style={{ color: t.textMuted }}>{activePaper.description}</p>
+                <p className="mt-1 truncate text-xs" style={{ color: t.textMuted }}>{activePaper.title}</p>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">

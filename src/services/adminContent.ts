@@ -1857,6 +1857,11 @@ export async function setUserTestSeriesUnlocked(uid: string, unlocked: boolean) 
   await updateDoc(doc(db, "users", uid), { testSeriesUnlocked: unlocked });
 }
 
+/** Grants or revokes the per-account Past Papers override — the "Past Papers" toggle in Manage Access. */
+export async function setUserPastPapersUnlocked(uid: string, unlocked: boolean) {
+  await updateDoc(doc(db, "users", uid), { pastPapersUnlocked: unlocked });
+}
+
 /** Grants or revokes premium (the full 1–15 bundle) for one account from the admin panel. */
 export async function setUserPremium(uid: string, premium: boolean) {
   await updateDoc(doc(db, "users", uid), {

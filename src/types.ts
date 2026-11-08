@@ -238,6 +238,12 @@ export interface UserProfile {
    * per-test Block/Subject rules.
    */
   testSeriesUnlocked?: boolean;
+  /**
+   * Per-account Past Papers access override, set only by an admin from the
+   * "Manage Access" admin tab (the "Past Papers" toggle next to a student's
+   * Manually Unlocked Blocks). `false`/absent means no override.
+   */
+  pastPapersUnlocked?: boolean;
 }
 
 export interface AttemptRecord {

@@ -75,6 +75,7 @@ import {
   subscribeAllUsers,
   setUserUnlockedBlocks,
   setUserTestSeriesUnlocked,
+  setUserPastPapersUnlocked,
   setUserPremium,
   subscribeFreeBlocks,
   saveFreeBlocks,
@@ -295,6 +296,24 @@ export default function AdminPanel() {
     } catch {
       setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, premium: u.premium, premiumExpiry: u.premiumExpiry } : x)));
       setAccessNotice(`Failed to update premium status for ${u.email || u.uid}.`);
+      setTimeout(() => setAccessNotice(null), 3500);
+    } finally {
+      setAccessSaving((s) => ({ ...s, [u.uid]: false }));
+    }
+  };
+
+  // Grants/revokes the standalone "Past Papers" override for one account.
+  const handleToggleUserPastPapers = async (u: UserProfile) => {
+    const next = !u.pastPapersUnlocked;
+    setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, pastPapersUnlocked: next } : x)));
+    setAccessSaving((s) => ({ ...s, [u.uid]: true }));
+    try {
+      await setUserPastPapersUnlocked(u.uid, next);
+      setAccessNotice(next ? `${u.email || u.uid} can now access Past Papers.` : `${u.email || u.uid} no longer has Past Papers access granted.`);
+      setTimeout(() => setAccessNotice(null), 2500);
+    } catch {
+      setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, pastPapersUnlocked: u.pastPapersUnlocked } : x)));
+      setAccessNotice(`Failed to update Past Papers access for ${u.email || u.uid}.`);
       setTimeout(() => setAccessNotice(null), 3500);
     } finally {
       setAccessSaving((s) => ({ ...s, [u.uid]: false }));
@@ -4435,6 +4454,21 @@ export default function AdminPanel() {
                           title={`Test Series${u.testSeriesUnlocked ? " (unlocked for this account)" : ""}`}
                         >
                           <ClipboardList size={12} /> Test
+                        </button>
+
+                        {/* Standalone Past Papers override for this one account. */}
+                        <button
+                          onClick={() => handleToggleUserPastPapers(u)}
+                          disabled={isSaving}
+                          className="flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-extrabold transition-all disabled:opacity-40"
+                          style={{
+                            backgroundColor: u.pastPapersUnlocked ? t.gold : t.surfaceAlt,
+                            color: u.pastPapersUnlocked ? "#fff" : t.textMuted,
+                            border: `1.5px solid ${u.pastPapersUnlocked ? t.gold : t.border}`,
+                          }}
+                          title={`Past Papers${u.pastPapersUnlocked ? " (unlocked for this account)" : ""}`}
+                        >
+                          <FileStack size={12} /> Past Papers
                         </button>
                       </div>
                     </div>
