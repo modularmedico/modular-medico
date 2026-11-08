@@ -152,7 +152,16 @@ export default async function handler(req, res) {
 
     let r = await send(true);
     if (r.status === 400) r = await send(false); // some providers reject the reasoning option
-    if (!r.ok) throw new Error(`${model}: HTTP ${r.status}`);
+    if (!r.ok) {
+      let detail = "";
+      try {
+        const e = await r.json();
+        detail = e?.error?.metadata?.raw || e?.error?.message || "";
+      } catch {
+        /* no JSON body */
+      }
+      throw new Error(`${model}: HTTP ${r.status}${detail ? ` - ${String(detail).slice(0, 140)}` : ""}`);
+    }
 
     const data = await r.json();
     const raw = data?.choices?.[0]?.message?.content?.trim();
@@ -196,7 +205,10 @@ export default async function handler(req, res) {
 
   const authProblem = failures.some((f) => /HTTP (401|403)/.test(f));
   const creditProblem = failures.some((f) => /HTTP 402/.test(f));
-  const message = authProblem
+  const policyProblem = failures.some((f) => /data policy|no endpoints found/i.test(f));
+  const message = policyProblem
+    ? "OpenRouter blocked the free models because of your privacy settings. Open openrouter.ai/settings/privacy and enable the free-endpoints / model-training option, then try again."
+    : authProblem
     ? "The OpenRouter API key was rejected (HTTP 401/403). Check OPENROUTER_API_KEY in Vercel and redeploy."
     : creditProblem
     ? "OpenRouter says this key has no credits for that model (HTTP 402). Try again or add credits."

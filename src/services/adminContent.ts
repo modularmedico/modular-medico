@@ -9,6 +9,7 @@ import {
   where,
   orderBy,
   getDocs,
+  documentId,
   getCountFromServer,
   setDoc,
   writeBatch,
@@ -1273,6 +1274,34 @@ function liveBankIfFresh(): FirestoreQuestion[] | null {
 // clear them once so they stop eating localStorage quota.
 cachePurgePrefix(["pubBlock_", "pubModuleExam_", "pubBlockExam_"]);
 
+/**
+ * Downloads one scope's questions as 4 parallel batches instead of one big request.
+ * The batches split the scope by document-id range, and the ranges together cover every
+ * possible id, so nothing is missed. Each batch is ~1/4 of the data, so a large scope
+ * arrives noticeably faster. If the batched query isn't allowed (e.g. an index issue), it
+ * quietly falls back to the original single query.
+ */
+const ID_RANGE_BOUNDS = ["E", "M", "U"]; // [..E) [E..M) [M..U) [U..]
+async function fetchScopeInParallel(clauses: QueryConstraint[]): Promise<FirestoreQuestion[]> {
+  const toQuestions = (snap: Awaited<ReturnType<typeof getDocs>>) =>
+    snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+  try {
+    const ranges: QueryConstraint[][] = [
+      [where(documentId(), "<", ID_RANGE_BOUNDS[0])],
+      [where(documentId(), ">=", ID_RANGE_BOUNDS[0]), where(documentId(), "<", ID_RANGE_BOUNDS[1])],
+      [where(documentId(), ">=", ID_RANGE_BOUNDS[1]), where(documentId(), "<", ID_RANGE_BOUNDS[2])],
+      [where(documentId(), ">=", ID_RANGE_BOUNDS[2])],
+    ];
+    const parts = await Promise.all(
+      ranges.map((r) => getDocs(query(collection(db, "questions"), ...clauses, ...r)))
+    );
+    return parts.flatMap(toQuestions);
+  } catch (err) {
+    console.warn("Parallel question fetch failed, using a single query instead:", err);
+    return toQuestions(await getDocs(query(collection(db, "questions"), ...clauses)));
+  }
+}
+
 async function fetchScopedBase(
   cacheKey: string,
   clauses: QueryConstraint[],
@@ -1287,8 +1316,7 @@ async function fetchScopedBase(
       if (bank) {
         fsResults = bank.filter(inScope);
       } else {
-        const snap = await getDocs(query(collection(db, "questions"), ...clauses));
-        fsResults = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+        fsResults = await fetchScopeInParallel(clauses);
       }
       const localQs = getLocalQuestions().filter((lq) => lq.status === "published" && inScope(lq));
       const defResults = DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && defaultInScope(dq));

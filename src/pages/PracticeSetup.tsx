@@ -141,7 +141,11 @@ export default function PracticeSetup() {
     let cancelled = false;
 
     const unsubDocs = subscribeTopics(block, moduleId, subjectId, (docs) => {
-      if (!cancelled) setTopicDocs(docs);
+      if (cancelled) return;
+      setTopicDocs(docs);
+      // Topic docs are enough to show the list right away; the question-derived names
+      // below only add legacy/untagged topics once they finish downloading.
+      if (docs.length > 0) setTopicsLoaded(true);
     });
 
     fetchPublishedBlock(subjectId, moduleId, block).then((qs) => {
