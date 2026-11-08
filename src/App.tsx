@@ -64,9 +64,10 @@ export default function App() {
     // Pre-download the screens students open next, while the browser is idle, so tapping
     // "Practice" never waits on a code chunk as well as on data.
     prefetchWhenIdle(() => {
-      import("./pages/HubBrowse");
-      import("./pages/PracticeSetup");
-      import("./pages/Practice");
+      // Failures here are harmless (the real navigation retries), so never let them surface.
+      import("./pages/HubBrowse").catch(() => {});
+      import("./pages/PracticeSetup").catch(() => {});
+      import("./pages/Practice").catch(() => {});
     }, 4000);
   }, []);
 

@@ -37,10 +37,43 @@
       if (root) root.appendChild(box);
       else document.body.appendChild(box);
     }
+    // After a new deploy, a device still holding the OLD app points at script files that no
+    // longer exist. That is not a real crash: clear the stale cache and reload once, silently.
+    var CHUNK_RE = /dynamically imported module|importing a module script|loading chunk|loading css chunk|unable to preload/i;
+    function isChunkError(x) {
+      var m = (x && (x.message || (x.reason && x.reason.message))) || String(x || "");
+      return CHUNK_RE.test(m);
+    }
+    function recover() {
+      try {
+        var last = Number(sessionStorage.getItem("mm_chunk_reload") || 0);
+        if (Date.now() - last < 60000) return false; // already tried a moment ago — show the error
+        sessionStorage.setItem("mm_chunk_reload", String(Date.now()));
+      } catch (e) {}
+      var done = function () { location.reload(); };
+      var work = [];
+      if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+        work.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+          return Promise.all(rs.map(function (r) { return r.unregister(); }));
+        }));
+      }
+      if (window.caches && caches.keys) {
+        work.push(caches.keys().then(function (ks) {
+          return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+        }));
+      }
+      Promise.all(work).then(done, done);
+      return true;
+    }
+    window.addEventListener("vite:preloadError", function (e) {
+      if (recover()) e.preventDefault();
+    });
     window.addEventListener("error", function (e) {
+      if (isChunkError(e.error || e) && recover()) return;
       showError((e.error && e.error.stack) || e.message || String(e));
     });
     window.addEventListener("unhandledrejection", function (e) {
+      if (isChunkError(e) && recover()) { e.preventDefault(); return; }
       var r = e.reason;
       showError((r && r.stack) || (r && r.message) || String(r));
     });
