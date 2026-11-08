@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, FileStack, FolderTree, X, ExternalLink, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
 import Spinner from "../components/Spinner";
+import AiExplain from "../components/AiExplain";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import { SUBJECT_META, type SubjectId } from "../data/subjects";
@@ -251,6 +252,19 @@ export default function PastPaperSubject() {
                 {mcqSelected !== null && currentMcq.explanation && (
                   <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}>
                     {currentMcq.explanation}
+                  </div>
+                )}
+
+                {mcqSelected !== null && (
+                  <div>
+                    <AiExplain
+                      key={`${activePaper?.id}-${mcqIndex}`}
+                      question={currentMcq.q}
+                      options={currentMcq.options}
+                      correct={currentMcq.correct}
+                      selected={mcqSelected}
+                      explanation={currentMcq.explanation}
+                    />
                   </div>
                 )}
 
