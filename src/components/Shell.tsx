@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState, useRef } from "react";
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import RouteFallback from "./RouteFallback";
+import RouteErrorBoundary from "./RouteErrorBoundary";
 import {
   Home as HomeIcon,
   BookOpen,
@@ -409,9 +410,11 @@ export default function Shell() {
 
         {/* Main Content Area */}
         <main className="w-full flex-1 px-4 pt-4 pb-24 md:px-8 md:pt-6 md:pb-12 min-h-[calc(100vh-61px)] overflow-x-hidden">
-          <Suspense fallback={<RouteFallback />}>
+          <RouteErrorBoundary>
+<Suspense fallback={<RouteFallback />}>
             <Outlet />
           </Suspense>
+</RouteErrorBoundary>
         </main>
       </div>
 

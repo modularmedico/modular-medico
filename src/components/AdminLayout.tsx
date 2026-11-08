@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { Outlet } from "react-router-dom";
 import RouteFallback from "./RouteFallback";
+import RouteErrorBoundary from "./RouteErrorBoundary";
 import { THEME, FONT_BODY } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 
@@ -10,9 +11,11 @@ export default function AdminLayout() {
   return (
     <div style={{ backgroundColor: t.bg, color: t.text, fontFamily: FONT_BODY, minHeight: "100vh" }}>
       <div className="mx-auto max-w-5xl px-5 py-8">
-        <Suspense fallback={<RouteFallback />}>
+        <RouteErrorBoundary>
+<Suspense fallback={<RouteFallback />}>
           <Outlet />
         </Suspense>
+</RouteErrorBoundary>
       </div>
     </div>
   );

@@ -5,11 +5,14 @@ import AdminLayout from "./components/AdminLayout";
 import ScrollToTop from "./components/ScrollToTop";
 import Home from "./pages/Home";
 import Auth from "./pages/Auth";
+// The browse -> setup -> practice path is bundled with the app on purpose: a student tapping
+// "Start" must never depend on a separate script download (slow/flaky data, or a stale cache
+// after a deploy, used to make this exact step fail).
+import HubBrowse from "./pages/HubBrowse";
+import PracticeSetup from "./pages/PracticeSetup";
+import Practice from "./pages/Practice";
 const Subjects = lazy(() => import("./pages/Subjects"));
-const HubBrowse = lazy(() => import("./pages/HubBrowse"));
 const SubjectDetail = lazy(() => import("./pages/SubjectDetail"));
-const PracticeSetup = lazy(() => import("./pages/PracticeSetup"));
-const Practice = lazy(() => import("./pages/Practice"));
 const Tests = lazy(() => import("./pages/Tests"));
 const Search = lazy(() => import("./pages/Search"));
 const Results = lazy(() => import("./pages/Results"));
@@ -31,7 +34,6 @@ import { subscribeFreeBlocks, subscribeFreeSubjects, subscribeTestSeriesAccess }
 import { useAppStore } from "./store/useAppStore";
 import { initAnalytics } from "./firebase";
 import { trackVisit } from "./services/siteStats";
-import { prefetchWhenIdle } from "./utils/localCache";
 
 // Blocks direct access to /admin. Anyone who isn't already unlocked (via the
 // admin-gate password screen) gets bounced to /admin-gate instead of seeing the panel.
@@ -61,14 +63,6 @@ export default function App() {
     // Records one visit for this browser session (see services/siteStats.ts).
     // Best-effort and silent — never blocks or affects the rest of the app.
     trackVisit();
-    // Pre-download the screens students open next, while the browser is idle, so tapping
-    // "Practice" never waits on a code chunk as well as on data.
-    prefetchWhenIdle(() => {
-      // Failures here are harmless (the real navigation retries), so never let them surface.
-      import("./pages/HubBrowse").catch(() => {});
-      import("./pages/PracticeSetup").catch(() => {});
-      import("./pages/Practice").catch(() => {});
-    }, 4000);
   }, []);
 
   // Keep which Blocks are free live for the lifetime of the app, so an

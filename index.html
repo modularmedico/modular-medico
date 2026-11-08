@@ -29,6 +29,10 @@
     var shown = false;
     function showError(msg) {
       if (shown) return;
+      // Only a startup failure deserves a full-screen error. Once the app is on screen, a failed
+      // background request must never replace it with a red page.
+      var r0 = document.getElementById("root");
+      if (r0 && r0.hasChildNodes()) return;
       shown = true;
       var root = document.getElementById("root");
       var box = document.createElement("div");
@@ -44,10 +48,10 @@
       var m = (x && (x.message || (x.reason && x.reason.message))) || String(x || "");
       return CHUNK_RE.test(m);
     }
-    function recover() {
+    function recover(force) {
       try {
         var last = Number(sessionStorage.getItem("mm_chunk_reload") || 0);
-        if (Date.now() - last < 60000) return false; // already tried a moment ago — show the error
+        if (!force && Date.now() - last < 60000) return false; // already tried a moment ago — show the error
         sessionStorage.setItem("mm_chunk_reload", String(Date.now()));
       } catch (e) {}
       var done = function () { location.reload(); };
@@ -65,6 +69,7 @@
       Promise.all(work).then(done, done);
       return true;
     }
+    window.mmRecover = recover;
     window.addEventListener("vite:preloadError", function (e) {
       if (recover()) e.preventDefault();
     });
