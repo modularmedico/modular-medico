@@ -73,6 +73,11 @@ export default function FreePastPapersManager() {
     persist({ ...effective, blocks }, cfg);
   };
 
+  const setAll = (free: boolean) => {
+    if (loading) return;
+    persist({ ...effective, blocks: free ? [...allBlocks] : [] }, cfg);
+  };
+
   const togglePaper = (id: string) => {
     if (loading) return;
     const ids = effective.ids.includes(id) ? effective.ids.filter((x) => x !== id) : [...effective.ids, id];
@@ -118,7 +123,26 @@ export default function FreePastPapersManager() {
         </div>
       ) : (
         <>
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setAll(true)}
+              disabled={saving}
+              className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold disabled:opacity-50"
+              style={{ backgroundColor: t.green, color: "#fff", border: `1.5px solid ${t.green}` }}
+            >
+              <Unlock size={12} /> Free for all
+            </button>
+            <button
+              onClick={() => setAll(false)}
+              disabled={saving}
+              className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold disabled:opacity-50"
+              style={{ backgroundColor: t.surfaceAlt, color: t.text, border: `1.5px solid ${t.border}` }}
+            >
+              <Lock size={12} /> Paywall all
+            </button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
             {allBlocks.map((b) => {
               const isFree = effective.blocks.includes(b);
               const freeCount = (papers ?? []).filter((p) => p.block === b && effective.ids.includes(p.id)).length;
