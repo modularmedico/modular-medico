@@ -195,19 +195,37 @@ export default function PastPaperList() {
           <div className="min-h-0 flex-1 overflow-y-auto">
             {activeMcqs.length > 0 && currentMcq ? (
               <div className="mx-auto flex max-w-2xl flex-col gap-4 p-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold" style={{ color: t.textMuted }}>
+                <div className="flex items-center gap-3">
+                  <span className="shrink-0 whitespace-nowrap text-xs font-bold" style={{ color: t.textMuted }}>
                     Question {mcqIndex + 1} of {activeMcqs.length}
                   </span>
-                  <div className="flex gap-1">
-                    {activeMcqs.map((_, i) => (
-                      <span
-                        key={i}
-                        className="h-1.5 w-5 rounded-full"
-                        style={{ backgroundColor: i === mcqIndex ? t.teal : t.border }}
+                  {/* Always fits the screen: segments share the width (flex-1) for short sets,
+                      and become one continuous bar for long ones. */}
+                  {activeMcqs.length <= 15 ? (
+                    <div className="flex min-w-0 flex-1 gap-1" aria-hidden>
+                      {activeMcqs.map((_, i) => (
+                        <span
+                          key={i}
+                          className="h-1.5 min-w-0 flex-1 rounded-full"
+                          style={{ backgroundColor: i <= mcqIndex ? t.teal : t.border }}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div
+                      className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full"
+                      style={{ backgroundColor: t.border }}
+                      role="progressbar"
+                      aria-valuemin={1}
+                      aria-valuemax={activeMcqs.length}
+                      aria-valuenow={mcqIndex + 1}
+                    >
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{ width: `${((mcqIndex + 1) / activeMcqs.length) * 100}%`, backgroundColor: t.teal }}
                       />
-                    ))}
-                  </div>
+                    </div>
+                  )}
                 </div>
 
                 <h4 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 16 }}>{currentMcq.q}</h4>
