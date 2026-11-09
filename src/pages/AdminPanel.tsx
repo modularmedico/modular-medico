@@ -118,6 +118,7 @@ import {
 import { parseBracketFormat } from "../utils/parseBracketFormat";
 import FreeSubjectsManager from "../components/admin/FreeSubjectsManager";
 import FreeTestsManager from "../components/admin/FreeTestsManager";
+import FreePastPapersManager from "../components/admin/FreePastPapersManager";
 import TestSessionsManager from "../components/admin/TestSessionsManager";
 import FirebaseUsagePanel from "../components/admin/FirebaseUsagePanel";
 import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreStudyNote, FirestorePastPaper, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
@@ -4286,6 +4287,7 @@ export default function AdminPanel() {
           </Card>
 
           <FreeTestsManager />
+          <FreePastPapersManager />
 
           <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
             <div className="flex items-start gap-3">

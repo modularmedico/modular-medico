@@ -4,7 +4,7 @@ import { ChevronLeft, FileStack, FolderTree, X, ExternalLink, ChevronRight, Chec
 import Spinner from "../components/Spinner";
 import AiExplain from "../components/AiExplain";
 import { THEME, FONT_DISPLAY } from "../theme";
-import { useAppStore } from "../store/useAppStore";
+import { useAppStore, useIsLoggedIn, useIsPaperBlockUnlocked } from "../store/useAppStore";
 import { paperIsPlaceable } from "./hubShared";
 import { subscribePublishedPastPapers, toDrivePreviewUrl } from "../services/pastPapers";
 import type { FirestorePastPaper } from "../types";
@@ -18,6 +18,8 @@ export default function PastPaperList() {
   const fTopic = searchParams.get("topic") || undefined;
 
   const isDark = useAppStore((s) => s.isDark);
+  const isLoggedIn = useIsLoggedIn();
+  const paperBlockOpen = useIsPaperBlockUnlocked(blockNum);
   const t = isDark ? THEME.dark : THEME.light;
 
   const [allPapers, setAllPapers] = useState<FirestorePastPaper[]>([]);
@@ -65,6 +67,11 @@ export default function PastPaperList() {
   const previewUrl = activePaper?.driveUrl ? toDrivePreviewUrl(activePaper.driveUrl) : null;
   const activeMcqs = activePaper?.mcqs || [];
   const currentMcq = activeMcqs[mcqIndex];
+
+  // This Block's Past Papers are paywalled (direct links included).
+  if (Number.isInteger(blockNum) && !paperBlockOpen) {
+    return <Navigate to={isLoggedIn ? "/paywall" : "/signup"} replace />;
+  }
 
   // No subheading picked (e.g. an old /past-papers/:block link) -> send them to the Block's subheadings.
   if (Number.isInteger(blockNum) && !fTopic) {

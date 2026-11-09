@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ActiveSetRef, AnswerRecord, PracticeConfig, UserProfile } from "../types";
-import { FREE_BLOCKS } from "../data/subjects";
+import { FREE_BLOCKS, TOTAL_BLOCKS } from "../data/subjects";
 
 export interface QuizSession {
   setRef: ActiveSetRef;
@@ -51,6 +51,11 @@ interface AppState {
   // Kept live by subscribeFreeSubjects() in App.tsx (Firestore settings/freeSubjects).
   freeSubjects: Record<number, string[]>;
   setFreeSubjects: (map: Record<number, string[]>) => void;
+
+  // Blocks whose Past Papers are free for everyone. Defaults to ALL blocks (Past
+  // Papers were previously open) until an admin saves settings/freePastPaperBlocks.
+  freePaperBlocks: number[];
+  setFreePaperBlocks: (blocks: number[]) => void;
 
   // Whether Test Series are open to students at all — defaults to true (on)
   // and is kept live by subscribeTestSeriesAccess() in App.tsx once
@@ -113,6 +118,8 @@ export const useAppStore = create<AppState>()(
       setFreeBlocks: (blocks) => set({ freeBlocks: blocks }),
       freeSubjects: {},
       setFreeSubjects: (map) => set({ freeSubjects: map }),
+      freePaperBlocks: Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1),
+      setFreePaperBlocks: (blocks) => set({ freePaperBlocks: blocks }),
 
       testSeriesEnabled: true,
       setTestSeriesEnabled: (enabled) => set({ testSeriesEnabled: enabled }),
@@ -152,6 +159,7 @@ export const useAppStore = create<AppState>()(
         profile: s.profile,
         freeBlocks: s.freeBlocks,
         freeSubjects: s.freeSubjects,
+        freePaperBlocks: s.freePaperBlocks,
         testSeriesEnabled: s.testSeriesEnabled,
         session: s.session,
         lastResult: s.lastResult,
@@ -201,6 +209,23 @@ export const useIsSubjectUnlocked = (block: number, subjectId: string | null | u
     }
     if (s.profile?.unlockedBlocks?.includes(block)) return true;
     return !!subjectId && !!s.freeSubjects[block]?.includes(subjectId);
+  });
+
+/**
+ * Whether the signed-in user can open the Past Papers of a Block: free when the
+ * admin marked that block free (Manage Access > Free Past Papers), and always
+ * for admins, active premium, accounts with the per-user `pastPapersUnlocked`
+ * override, or accounts given that block via `unlockedBlocks`.
+ */
+export const useIsPaperBlockUnlocked = (block: number) =>
+  useAppStore((s) => {
+    if (s.freePaperBlocks.includes(block)) return true;
+    if (s.isAdmin) return true;
+    if (s.profile?.premium) {
+      if (!s.profile.premiumExpiry || s.profile.premiumExpiry > Date.now()) return true;
+    }
+    if (s.profile?.pastPapersUnlocked) return true;
+    return !!s.profile?.unlockedBlocks?.includes(block);
   });
 
 /**

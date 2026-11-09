@@ -30,7 +30,7 @@ const Paywall = lazy(() => import("./pages/Paywall"));
 import NotFound from "./pages/NotFound";
 import { subscribeAuth } from "./services/auth";
 import { subscribeUserProfile } from "./services/firestore";
-import { subscribeFreeBlocks, subscribeFreeSubjects, subscribeTestSeriesAccess } from "./services/adminContent";
+import { subscribeFreeBlocks, subscribeFreeSubjects, subscribeFreePaperBlocks, subscribeTestSeriesAccess } from "./services/adminContent";
 import { useAppStore } from "./store/useAppStore";
 import { initAnalytics } from "./firebase";
 import { trackVisit } from "./services/siteStats";
@@ -55,6 +55,7 @@ export default function App() {
   const setAuthReady = useAppStore((s) => s.setAuthReady);
   const setFreeBlocks = useAppStore((s) => s.setFreeBlocks);
   const setFreeSubjects = useAppStore((s) => s.setFreeSubjects);
+  const setFreePaperBlocks = useAppStore((s) => s.setFreePaperBlocks);
   const setTestSeriesEnabled = useAppStore((s) => s.setTestSeriesEnabled);
   const uid = useAppStore((s) => s.uid);
 
@@ -75,6 +76,9 @@ export default function App() {
 
   // Same for per-subject free access inside paid blocks.
   useEffect(() => subscribeFreeSubjects(setFreeSubjects), [setFreeSubjects]);
+
+  // Same for which Blocks' Past Papers are free.
+  useEffect(() => subscribeFreePaperBlocks(setFreePaperBlocks), [setFreePaperBlocks]);
 
   // Same for the global Test Series on/off switch.
   useEffect(() => subscribeTestSeriesAccess(setTestSeriesEnabled), [setTestSeriesEnabled]);

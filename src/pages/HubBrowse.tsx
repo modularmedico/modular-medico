@@ -102,6 +102,8 @@ export default function HubBrowse() {
   const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
   const freeBlocks = useAppStore((s) => s.freeBlocks);
   const freeSubjects = useAppStore((s) => s.freeSubjects);
+  const freePaperBlocks = useAppStore((s) => s.freePaperBlocks);
+  const pastPapersUnlocked = useAppStore((s) => !!s.profile?.pastPapersUnlocked);
   const t = isDark ? THEME.dark : THEME.light;
   const accent = kind === "mcqs" ? t.teal : kind === "tests" ? t.purple : t.gold;
 
@@ -109,6 +111,9 @@ export default function HubBrowse() {
   const isBlockUnlocked = (b: number) => freeBlocks.includes(b) || isAdmin || isPremium || !!unlockedBlocks?.includes(b);
   const isBlockBadgeLocked = (b: number) => !freeBlocks.includes(b) && !isPremium && !unlockedBlocks?.includes(b);
   const isSubjectOpen = (b: number, s: string) => isBlockUnlocked(b) || !!freeSubjects[b]?.includes(s);
+  // Past Papers access: free blocks (Admin > Manage Access), or any kind of unlock.
+  const isPaperBlockOpen = (b: number) =>
+    freePaperBlocks.includes(b) || isAdmin || isPremium || pastPapersUnlocked || !!unlockedBlocks?.includes(b);
   const goPaywall = () => navigate(isLoggedIn ? "/paywall" : "/signup");
 
   const [yearFilter, setYearFilter] = useState("all");
@@ -302,6 +307,7 @@ export default function HubBrowse() {
   const openTopic = (name: string | null, key: string | null) => {
     if (kind === "papers") {
       if (blockNum === undefined) return;
+      if (!isPaperBlockOpen(blockNum)) return goPaywall();
       navigate(`/past-papers/${blockNum}${key ? `?topic=${encodeURIComponent(key)}` : ""}`);
       return;
     }
@@ -335,7 +341,7 @@ export default function HubBrowse() {
             ? blockCounts ? blockCounts[b.block] ?? 0 : null
             : distinctCount(entries.filter((e) => e.block === b.block)),
         label: kind === "papers" ? paperCountText(entries.filter((e) => e.block === b.block)) : undefined,
-        locked: kind === "mcqs" && isBlockBadgeLocked(b.block),
+        locked: kind === "mcqs" ? isBlockBadgeLocked(b.block) : kind === "papers" && !isPaperBlockOpen(b.block),
         onClick: () => navigate(`${base}/${b.block}`),
       }));
       return [r, info.title, "Choose a Block to continue.", "/", "Home"];

@@ -17,7 +17,7 @@ import {
 } from "firebase/firestore";
 import { db, app, getFirebaseAuth } from "../firebase";
 import { DEFAULT_MODULES, DEFAULT_QUESTIONS } from "../data/defaultCurriculum";
-import { DEFAULT_BLOCK_DEFINITIONS, FREE_BLOCKS as DEFAULT_FREE_BLOCKS, type BlockDefinition } from "../data/subjects";
+import { DEFAULT_BLOCK_DEFINITIONS, FREE_BLOCKS as DEFAULT_FREE_BLOCKS, TOTAL_BLOCKS, type BlockDefinition } from "../data/subjects";
 import type { Difficulty, FirestoreQuestion, ModuleDoc, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 import { cacheFirstFetch, cacheFirstSnapshot, cacheThenFetch, cachePurgePrefix, prefetchWhenIdle, ONE_HOUR, ONE_DAY } from "../utils/localCache";
 
@@ -80,6 +80,68 @@ export async function saveFreeBlocks(blocks: number[]): Promise<void> {
   const cleaned = Array.from(new Set(blocks)).sort((a, b) => a - b);
   setLocalFreeBlocks(cleaned);
   await setDoc(doc(db, "settings", "freeBlocks"), { blocks: cleaned });
+}
+
+/* ------------------------ Free Past Paper blocks ------------------------ */
+
+/**
+ * Which Blocks' Past Papers are FREE for everyone, stored in
+ * `settings/freePastPaperBlocks` as `{ blocks: number[] }`. Past Papers used to
+ * be open to all, so until an admin saves this doc EVERY block counts as free
+ * (nothing changes for students). Once saved, the list is authoritative: a
+ * block that isn't in it is paywalled.
+ */
+const LOCAL_FREE_PAPER_BLOCKS_KEY = "modular_medico_free_paper_blocks";
+export const ALL_PAPER_BLOCKS: number[] = Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1);
+
+function getLocalFreePaperBlocks(): number[] | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_FREE_PAPER_BLOCKS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(Number);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function setLocalFreePaperBlocks(blocks: number[]) {
+  try {
+    localStorage.setItem(LOCAL_FREE_PAPER_BLOCKS_KEY, JSON.stringify(blocks));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live view of which Blocks' Past Papers are free for everyone. */
+export function subscribeFreePaperBlocks(cb: (blocks: number[]) => void) {
+  const fallback = getLocalFreePaperBlocks() ?? ALL_PAPER_BLOCKS;
+  return onSnapshot(
+    doc(db, "settings", "freePastPaperBlocks"),
+    (snap) => {
+      if (snap.exists()) {
+        const raw = (snap.data() as { blocks?: unknown }).blocks;
+        const blocks = Array.isArray(raw) ? Array.from(new Set(raw.map(Number))) : ALL_PAPER_BLOCKS;
+        setLocalFreePaperBlocks(blocks);
+        cb(blocks);
+      } else {
+        cb(fallback);
+      }
+    },
+    (err) => {
+      console.warn("Firestore freePastPaperBlocks fallback:", err.message);
+      cb(fallback);
+    }
+  );
+}
+
+/** Admin action: replace the list of Blocks whose Past Papers are free. */
+export async function saveFreePaperBlocks(blocks: number[]): Promise<void> {
+  const cleaned = Array.from(new Set(blocks)).sort((a, b) => a - b);
+  setLocalFreePaperBlocks(cleaned);
+  await setDoc(doc(db, "settings", "freePastPaperBlocks"), { blocks: cleaned });
 }
 
 /* ---------------------------- Test Series gate --------------------------- */
