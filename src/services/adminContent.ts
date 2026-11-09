@@ -826,7 +826,7 @@ export interface QuestionInput {
  * that never reached the database still appeared to save fine in the admin's
  * own browser.
  */
-export type SaveResult = { source: "firestore" };
+export type SaveResult = { source: "firestore"; /** Existing MCQs with the same question text that were overwritten by the newer one. */ replaced?: number };
 
 export type SaveErrorReason = "permission-denied" | "offline" | "unknown";
 
@@ -875,15 +875,58 @@ function messageForReason(reason: SaveErrorReason, plural: boolean): string {
   return `${these} MCQ${plural ? "s" : ""} ${werent} saved — Firestore rejected the write for an unknown reason. Please try again.`;
 }
 
-export async function addQuestion(input: QuestionInput): Promise<SaveResult> {
-  const cleanInput = {
-    ...input,
-    status: input.status ?? "draft",
-    createdAt: Date.now(),
-  };
+/** Question text compared ignoring case and extra whitespace. */
+const normalizeQ = (t: string) => (t || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * Saves MCQs, REPLACING any existing MCQ whose question text matches (the newer one wins).
+ * - Matches are found in `existing` (the admin's loaded bank), ignoring case/spacing.
+ * - The OLDEST match is overwritten in place (so its id, and anything pointing at it, survives);
+ *   any further older copies are deleted so only one remains.
+ * - Duplicates inside the same batch collapse to the last one typed.
+ */
+async function saveReplacingDuplicates(inputs: QuestionInput[], existing: FirestoreQuestion[]): Promise<SaveResult> {
+  const latestByText = new Map<string, QuestionInput>();
+  inputs.forEach((i) => latestByText.set(normalizeQ(i.q), i));
+
+  const existingByText = new Map<string, FirestoreQuestion[]>();
+  existing.forEach((e) => {
+    const k = normalizeQ(e.q);
+    if (!latestByText.has(k)) return;
+    const list = existingByText.get(k) ?? [];
+    list.push(e);
+    existingByText.set(k, list);
+  });
+
+  type Op = { kind: "set"; id: string | null; data: QuestionInput } | { kind: "delete"; id: string };
+  const ops: Op[] = [];
+  let replaced = 0;
+  latestByText.forEach((input, k) => {
+    const matches = (existingByText.get(k) ?? []).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    ops.push({ kind: "set", id: matches[0]?.id ?? null, data: input });
+    if (matches.length) replaced++;
+    matches.slice(1).forEach((m) => ops.push({ kind: "delete", id: m.id }));
+  });
+
+  // Firestore batches hold at most 500 writes — stay well under it.
+  for (let i = 0; i < ops.length; i += 400) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + 400).forEach((op) => {
+      if (op.kind === "delete") {
+        batch.delete(doc(db, "questions", op.id));
+      } else {
+        const ref = op.id ? doc(db, "questions", op.id) : doc(collection(db, "questions"));
+        batch.set(ref, { ...op.data, status: op.data.status ?? "draft", createdAt: Date.now() });
+      }
+    });
+    await batch.commit();
+  }
+  return { source: "firestore", replaced };
+}
+
+export async function addQuestion(input: QuestionInput, existing: FirestoreQuestion[] = []): Promise<SaveResult> {
   try {
-    await addDoc(collection(db, "questions"), cleanInput);
-    return { source: "firestore" };
+    return await saveReplacingDuplicates([input], existing);
   } catch (err) {
     console.error("Firestore addQuestion failed:", err);
     const reason = classifyWriteError(err);
@@ -913,15 +956,9 @@ export async function updateQuestion(id: string, input: QuestionInput): Promise<
   }
 }
 
-export async function bulkAddQuestions(inputs: QuestionInput[]): Promise<SaveResult> {
+export async function bulkAddQuestions(inputs: QuestionInput[], existing: FirestoreQuestion[] = []): Promise<SaveResult> {
   try {
-    const batch = writeBatch(db);
-    inputs.forEach((input) => {
-      const ref = doc(collection(db, "questions"));
-      batch.set(ref, { ...input, status: input.status ?? "draft", createdAt: Date.now() });
-    });
-    await batch.commit();
-    return { source: "firestore" };
+    return await saveReplacingDuplicates(inputs, existing);
   } catch (err) {
     console.error("Firestore bulkAddQuestions failed:", err);
     const reason = classifyWriteError(err);

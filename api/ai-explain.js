@@ -47,10 +47,25 @@ const MODE_INSTRUCTIONS = {
 // one at a time we race a small batch in parallel and take the first good answer.
 // Worst case: 3s catalog lookup + 2 waves x 12s = 27s, under the 30s maxDuration in vercel.json.
 const WAVE_SIZE = 3;
-const MAX_WAVES = 2;
-const WAVE_TIMEOUT_MS = 12000;
+const MAX_WAVES = 3;
+const WAVE_TIMEOUT_MS = 8000;
+// Hard budget: we must answer (even with an error) before the platform's 30s limit kills the
+// function, otherwise the browser only sees a bare, unexplained "HTTP 502".
+const TOTAL_BUDGET_MS = 24000;
 
 export default async function handler(req, res) {
+  try {
+    await handleRequest(req, res);
+  } catch (e) {
+    console.error("ai-explain crashed:", e);
+    if (!res.headersSent) {
+      res.status(502).json({ error: `The AI service hit an internal error (${e && e.message ? e.message : "unknown"}). Please try again.` });
+    }
+  }
+}
+
+async function handleRequest(req, res) {
+  const startedAt = Date.now();
   // Diagnostic: open /api/ai-explain in a browser (GET) to see what's wrong. Never reveals the key.
   if (req.method === "GET") {
     const key = process.env.OPENROUTER_API_KEY;
@@ -181,9 +196,11 @@ export default async function handler(req, res) {
   for (let wave = 0; wave < MAX_WAVES; wave++) {
     const batch = ordered.slice(wave * WAVE_SIZE, (wave + 1) * WAVE_SIZE);
     if (batch.length === 0) break;
+    const remaining = TOTAL_BUDGET_MS - (Date.now() - startedAt);
+    if (remaining < 3000) break;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), WAVE_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), Math.min(WAVE_TIMEOUT_MS, remaining));
     try {
       const winner = await Promise.any(
         batch.map((m) =>
@@ -258,7 +275,7 @@ async function getModelCandidates(apiKey) {
   let ids = FALLBACK_FREE_MODELS;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+    const timeout = setTimeout(() => controller.abort(), 3000);
     const r = await fetch("https://openrouter.ai/api/v1/models", {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
@@ -273,7 +290,9 @@ async function getModelCandidates(apiKey) {
         .filter((id) => typeof id === "string" && id.endsWith(":free"));
 
       if (liveFreeIds.length > 0) {
-        ids = Array.from(new Set([...liveFreeIds, ...FALLBACK_FREE_MODELS]));
+        // Known-good models that are currently live go first; the rest of the live free pool follows.
+        const live = new Set(liveFreeIds);
+        ids = Array.from(new Set([...FALLBACK_FREE_MODELS.filter((m) => live.has(m)), ...liveFreeIds, ...FALLBACK_FREE_MODELS]));
       }
     }
   } catch {

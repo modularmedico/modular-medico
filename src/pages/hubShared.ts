@@ -28,6 +28,8 @@ export interface HubEntry {
   moduleName: string;
   subjectId: string; // "all" when a test mixes subjects
   topic: string | null; // null = General
+  /** Past papers only: how many typed-in MCQs this paper holds (PDF/Drive-link papers have none). */
+  mcqCount?: number;
 }
 
 export function entriesFromTests(tests: TestSessionDoc[]): HubEntry[] {
@@ -60,7 +62,17 @@ export function entriesFromPapers(papers: FirestorePastPaper[]): HubEntry[] {
     moduleName: "",
     subjectId: "",
     topic: (p.topicName || "").trim(),
+    mcqCount: p.mcqs?.length ?? 0,
   }));
+}
+
+/** "12 MCQs" for papers that hold MCQs; falls back to "2 Papers" for PDF-only papers. */
+export function paperCountText(entries: HubEntry[]): string {
+  const seen = new Map<string, number>();
+  entries.forEach((e) => seen.set(e.id, e.mcqCount ?? 0));
+  const mcqs = Array.from(seen.values()).reduce((a, b) => a + b, 0);
+  if (mcqs > 0) return `${mcqs} ${mcqs === 1 ? "MCQ" : "MCQs"}`;
+  return `${seen.size} ${seen.size === 1 ? "Paper" : "Papers"}`;
 }
 
 /** Number of distinct tests/papers in a set of entries (a test can touch the same node twice). */

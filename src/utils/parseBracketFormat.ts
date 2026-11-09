@@ -9,7 +9,7 @@ import type { ImportResult } from "../types";
  */
 export function parseBracketFormat(raw: string, existing: { q: string }[] = []): ImportResult[] {
   const blocks = raw.match(/\[[\s\S]*?\]/g) || [];
-  const existingNorm = new Set(existing.map((q) => q.q.trim().toLowerCase()));
+  const existingNorm = new Set(existing.map((q) => q.q.replace(/\s+/g, " ").trim().toLowerCase()));
 
   return blocks.map((block, i) => {
     const inner = block.slice(1, -1).trim();
@@ -74,13 +74,13 @@ export function parseBracketFormat(raw: string, existing: { q: string }[] = []):
 
     const correctIdx = rawOpts.findIndex(isMarked);
     const options = rawOpts.map((o) => o.replace(/^\*+|\*+$/g, "").trim());
-    const duplicate = existingNorm.has(qText.toLowerCase());
+    const duplicate = existingNorm.has(qText.replace(/\s+/g, " ").trim().toLowerCase());
 
     return {
       line: i + 1,
       raw: block,
       status: duplicate ? "warning" : "valid",
-      message: duplicate ? "Possible duplicate of an existing question." : "Valid MCQ.",
+      message: duplicate ? "Same question already exists — saving will replace the old one." : "Valid MCQ.",
       q: qText,
       options,
       correct: correctIdx,

@@ -13,6 +13,12 @@ const AI_MODE_OPTIONS: { mode: AiMode; label: string; icon: typeof Sparkles }[] 
   { mode: "depth", label: "In Depth Explanation", icon: Microscope },
 ];
 
+function hashText(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 interface Props {
   question: string;
   options: string[];
@@ -38,6 +44,18 @@ export default function AiExplain({ question, options, correct, selected, explan
     setLoading(true);
     setAnswer(null);
     setError(null);
+    // Same question + same mode was answered before? Show it instantly, no AI call, no rate limit.
+    const cacheKey = `ai_${m}_${hashText(question + "|" + options[correct])}`;
+    try {
+      const hit = localStorage.getItem(cacheKey);
+      if (hit) {
+        setAnswer(hit);
+        setLoading(false);
+        return;
+      }
+    } catch {
+      /* storage unavailable */
+    }
     try {
       const res = await fetch("/api/ai-explain", {
         method: "POST",
@@ -51,15 +69,28 @@ export default function AiExplain({ question, options, correct, selected, explan
           mode: m,
         }),
       });
-      const data = await res.json().catch(() => null);
+      const raw = await res.text();
+      let data: { answer?: string; error?: string } | null = null;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        /* not JSON — probably a platform error page */
+      }
       if (!res.ok || !data?.answer) {
         setError(
           data?.error ||
             (res.status === 404
               ? "The AI endpoint (/api/ai-explain) wasn't found. It only works on the deployed Vercel site (or via `vercel dev`), not plain `npm run dev`."
-              : `Couldn't get an AI explanation right now (HTTP ${res.status}). Please try again.`)
+              : `The AI server didn't answer properly (HTTP ${res.status}${raw ? `: ${raw.replace(/\s+/g, " ").slice(0, 120)}` : ""}). Please try again.`)
         );
-      } else setAnswer(data.answer);
+      } else {
+        setAnswer(data.answer);
+        try {
+          localStorage.setItem(cacheKey, data.answer);
+        } catch {
+          /* storage full */
+        }
+      }
     } catch {
       setError("Network error — check your connection and try again.");
     } finally {

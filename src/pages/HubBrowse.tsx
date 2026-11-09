@@ -34,6 +34,7 @@ import { subscribePublishedTestSessions } from "../services/testSessions";
 import {
   GENERAL_LABEL,
   distinctCount,
+  paperCountText,
   entriesFromPapers,
   entriesFromTests,
   isHubKind,
@@ -59,6 +60,8 @@ const KIND_INFO: Record<HubKind, { title: string; unit: string; units: string; i
 };
 
 interface Row {
+  /** Overrides the default count text (used by Past Papers to say "N MCQs"). */
+  label?: string;
   key: string;
   title: string;
   subtitle?: string;
@@ -270,7 +273,7 @@ export default function HubBrowse() {
     return Array.from(map.entries()).map(([sid, items]) => ({ subjectId: sid, count: distinctCount(items) }));
   }, [kind, level, outline, inBlock, moduleId]);
 
-  const topicRows = useMemo<{ name: string; key?: string; count: number }[]>(() => {
+  const topicRows = useMemo<{ name: string; key?: string; count: number; label?: string }[]>(() => {
     if (kind !== "papers" && level < 3) return [];
     if (kind === "mcqs") return topicCounts ?? [];
     const map = new Map<string, { name: string | null; items: HubEntry[] }>();
@@ -284,7 +287,12 @@ export default function HubBrowse() {
         map.set(k, cur);
       });
     return Array.from(map.values())
-      .map((g) => ({ name: g.name ?? GENERAL_LABEL, key: topicToKey(g.name), count: distinctCount(g.items) }))
+      .map((g) => ({
+        name: g.name ?? GENERAL_LABEL,
+        key: topicToKey(g.name),
+        count: distinctCount(g.items),
+        label: kind === "papers" ? paperCountText(g.items) : undefined,
+      }))
       .sort((a, b) => (a.key === "__general" ? 1 : b.key === "__general" ? -1 : a.name.localeCompare(b.name, undefined, { numeric: true })));
   }, [kind, level, topicCounts, inBlock, moduleId, subjectId]);
 
@@ -326,6 +334,7 @@ export default function HubBrowse() {
           kind === "mcqs"
             ? blockCounts ? blockCounts[b.block] ?? 0 : null
             : distinctCount(entries.filter((e) => e.block === b.block)),
+        label: kind === "papers" ? paperCountText(entries.filter((e) => e.block === b.block)) : undefined,
         locked: kind === "mcqs" && isBlockBadgeLocked(b.block),
         onClick: () => navigate(`${base}/${b.block}`),
       }));
@@ -336,6 +345,7 @@ export default function HubBrowse() {
         key: tp.key ?? tp.name,
         title: tp.name,
         count: tp.count,
+        label: tp.label,
         onClick: () => openTopic(null, tp.key ?? null),
       }));
       return [r, blockTitle, "Choose a Subheading.", base, info.title];
@@ -598,7 +608,7 @@ export default function HubBrowse() {
                 {r.subtitle}
               </span>
               <span style={{ fontFamily: FONT_MONO, fontSize: 10, color: t.textFaint, marginTop: 2 }}>
-                {countLabel(r.count)}
+                {r.label ?? countLabel(r.count)}
               </span>
             </button>
           ))}
@@ -656,7 +666,7 @@ export default function HubBrowse() {
                   className="rounded-full px-2.5 py-1 font-mono text-xs font-bold"
                   style={{ backgroundColor: `${t.gold}18`, color: t.gold }}
                 >
-                  {countLabel(r.count)}
+                  {r.label ?? countLabel(r.count)}
                 </span>
                 <ArrowRight size={16} color={t.textFaint} />
               </div>

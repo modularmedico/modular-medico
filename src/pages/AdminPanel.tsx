@@ -414,6 +414,7 @@ export default function AdminPanel() {
   const [bracketText, setBracketText] = useState("");
   const [saveStatus, setSaveStatus] = useState<"success" | "error" | null>(null);
   const [savedCount, setSavedCount] = useState(0);
+  const [replacedCount, setReplacedCount] = useState(0);
 
   // Traditional Mode State
   const [traditionalQ, setTraditionalQ] = useState("");
@@ -1146,8 +1147,9 @@ export default function AdminPanel() {
         status: (publishImmediately ? "published" : "draft") as QuestionStatus,
       }));
 
-      await bulkAddQuestions(itemsToSave);
+      const result = await bulkAddQuestions(itemsToSave, allQuestions);
       setSavedCount(itemsToSave.length);
+      setReplacedCount(result.replaced ?? 0);
       setSaveStatus("success");
       setSaveWarning(null);
       setBracketText("");
@@ -1177,7 +1179,7 @@ export default function AdminPanel() {
     }
     try {
       const topic = await resolveTopicForSave();
-      await addQuestion({
+      const result = await addQuestion({
         subjectId,
         moduleId: effectiveModuleId,
         moduleName: effectiveModuleName,
@@ -1190,9 +1192,10 @@ export default function AdminPanel() {
         correct: correctOptionIdx,
         explanation: explanation.trim(),
         status: (publishImmediately ? "published" : "draft") as QuestionStatus,
-      });
+      }, allQuestions);
 
       setSavedCount(1);
+      setReplacedCount(result.replaced ?? 0);
       setSaveStatus("success");
       setSaveWarning(null);
       setTimeout(() => setSaveStatus(null), 3000);
@@ -1907,7 +1910,8 @@ export default function AdminPanel() {
               style={{ backgroundColor: `${t.green}20`, border: `1.5px solid ${t.green}`, color: t.green }}
             >
               <CheckCircle2 size={18} />
-              <span>Successfully saved {savedCount} MCQ{savedCount !== 1 ? "s" : ""} to Block {effectiveBlock} &bull; {effectiveModuleName}!</span>
+              <span>Successfully saved {savedCount} MCQ{savedCount !== 1 ? "s" : ""} to Block {effectiveBlock} &bull; {effectiveModuleName}!
+                {replacedCount > 0 && ` (${replacedCount} older duplicate${replacedCount !== 1 ? "s" : ""} replaced)`}</span>
             </div>
           )}
 
