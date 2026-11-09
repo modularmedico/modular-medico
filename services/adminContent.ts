@@ -9,16 +9,17 @@ import {
   where,
   orderBy,
   getDocs,
+  documentId,
   getCountFromServer,
   setDoc,
   writeBatch,
   type QueryConstraint,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, app, getFirebaseAuth } from "../firebase";
 import { DEFAULT_MODULES, DEFAULT_QUESTIONS } from "../data/defaultCurriculum";
 import { DEFAULT_BLOCK_DEFINITIONS, FREE_BLOCKS as DEFAULT_FREE_BLOCKS, type BlockDefinition } from "../data/subjects";
 import type { Difficulty, FirestoreQuestion, ModuleDoc, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
-import { cacheFirstFetch, cacheFirstSnapshot, cacheThenFetch, cachePurgePrefix, ONE_HOUR } from "../utils/localCache";
+import { cacheFirstFetch, cacheFirstSnapshot, cacheThenFetch, cachePurgePrefix, prefetchWhenIdle, ONE_HOUR, ONE_DAY } from "../utils/localCache";
 
 const LOCAL_MODULES_KEY = "modular_medico_custom_modules";
 const LOCAL_BLOCKS_KEY = "modular_medico_custom_blocks";
@@ -79,6 +80,205 @@ export async function saveFreeBlocks(blocks: number[]): Promise<void> {
   const cleaned = Array.from(new Set(blocks)).sort((a, b) => a - b);
   setLocalFreeBlocks(cleaned);
   await setDoc(doc(db, "settings", "freeBlocks"), { blocks: cleaned });
+}
+
+/* ---------------------------- Test Series gate --------------------------- */
+
+/**
+ * Whether Test Sessions ("Test Series") are open to students at all, stored
+ * in a single Firestore doc (`settings/testSeriesAccess`) so an admin can
+ * flip it at runtime from the "Manage Access" tab, right alongside the Block
+ * unlock controls. Defaults to ON (true) so existing behavior is unchanged
+ * until an admin turns it off. Falls back to the localStorage cache, then to
+ * the default, if Firestore is unreachable or the doc doesn't exist yet.
+ */
+const LOCAL_TEST_SERIES_ACCESS_KEY = "modular_medico_test_series_access";
+
+function getLocalTestSeriesAccess(): boolean | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_TEST_SERIES_ACCESS_KEY);
+    if (raw !== null) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function setLocalTestSeriesAccess(enabled: boolean) {
+  try {
+    localStorage.setItem(LOCAL_TEST_SERIES_ACCESS_KEY, JSON.stringify(enabled));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live view of whether students can currently access Test Series. */
+export function subscribeTestSeriesAccess(cb: (enabled: boolean) => void) {
+  const fallback = getLocalTestSeriesAccess() ?? true;
+  const ref = doc(db, "settings", "testSeriesAccess");
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as { enabled?: boolean };
+        const enabled = typeof data.enabled === "boolean" ? data.enabled : fallback;
+        setLocalTestSeriesAccess(enabled);
+        cb(enabled);
+      } else {
+        cb(fallback);
+      }
+    },
+    (err) => {
+      console.warn("Firestore testSeriesAccess fallback:", err.message);
+      cb(fallback);
+    }
+  );
+}
+
+/** Admin action: turn Test Series access on/off for every student at once. */
+export async function saveTestSeriesAccess(enabled: boolean): Promise<void> {
+  setLocalTestSeriesAccess(enabled);
+  await setDoc(doc(db, "settings", "testSeriesAccess"), { enabled });
+}
+
+/* ------------------------- Free individual tests ------------------------- */
+
+/**
+ * Test Session ids that are FREE for everyone, even if the blocks/subjects they
+ * draw from are paywalled. Stored in `settings/freeTests` as `{ ids: string[] }`.
+ */
+const LOCAL_FREE_TESTS_KEY = "modular_medico_free_tests";
+
+function getLocalFreeTests(): string[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_FREE_TESTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function setLocalFreeTests(ids: string[]) {
+  try {
+    localStorage.setItem(LOCAL_FREE_TESTS_KEY, JSON.stringify(ids));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live view of which Test Sessions are free for everyone. */
+export function subscribeFreeTests(cb: (ids: string[]) => void) {
+  const fallback = getLocalFreeTests();
+  return onSnapshot(
+    doc(db, "settings", "freeTests"),
+    (snap) => {
+      if (snap.exists()) {
+        const raw = (snap.data() as { ids?: unknown }).ids;
+        const ids = Array.isArray(raw) ? Array.from(new Set(raw.map(String))) : [];
+        setLocalFreeTests(ids);
+        cb(ids);
+      } else {
+        cb(fallback);
+      }
+    },
+    (err) => {
+      console.warn("Firestore freeTests fallback:", err.message);
+      cb(fallback);
+    }
+  );
+}
+
+/** Admin action: replace the list of free Test Sessions. */
+export async function saveFreeTests(ids: string[]): Promise<void> {
+  const cleaned = Array.from(new Set(ids));
+  setLocalFreeTests(cleaned);
+  await setDoc(doc(db, "settings", "freeTests"), { ids: cleaned });
+}
+
+/* ------------------------- Free Past Papers ------------------------- */
+
+/**
+ * Past Papers paywall. Stored in `settings/freePastPapers` as
+ * `{ blocks: number[], ids: string[] }`:
+ *  - `blocks`: Past Paper Blocks that are free for everyone
+ *  - `ids`:    individual papers that are free even when their Block is paid
+ * If the doc doesn't exist yet (admin never configured it) the callback gets
+ * `null`, meaning "no paywall" so existing papers stay open until an admin
+ * decides what to lock.
+ */
+export interface FreePastPapersConfig {
+  blocks: number[];
+  ids: string[];
+}
+
+const LOCAL_FREE_PAST_PAPERS_KEY = "modular_medico_free_past_papers";
+
+function normalizeFreePastPapers(raw: unknown): FreePastPapersConfig {
+  const r = (raw ?? {}) as { blocks?: unknown; ids?: unknown };
+  const blocks = Array.isArray(r.blocks)
+    ? Array.from(new Set(r.blocks.map(Number).filter((n) => Number.isInteger(n) && n > 0))).sort((a, b) => a - b)
+    : [];
+  const ids = Array.isArray(r.ids) ? Array.from(new Set(r.ids.map(String))) : [];
+  return { blocks, ids };
+}
+
+function getLocalFreePastPapers(): FreePastPapersConfig | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_FREE_PAST_PAPERS_KEY);
+    if (raw) return normalizeFreePastPapers(JSON.parse(raw));
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function setLocalFreePastPapers(cfg: FreePastPapersConfig) {
+  try {
+    localStorage.setItem(LOCAL_FREE_PAST_PAPERS_KEY, JSON.stringify(cfg));
+  } catch {
+    // ignore
+  }
+}
+
+/** Live view of the Past Papers paywall config (`null` = never configured, nothing is locked). */
+export function subscribeFreePastPapers(cb: (cfg: FreePastPapersConfig | null) => void) {
+  const fallback = getLocalFreePastPapers();
+  return onSnapshot(
+    doc(db, "settings", "freePastPapers"),
+    (snap) => {
+      if (snap.exists()) {
+        const cfg = normalizeFreePastPapers(snap.data());
+        setLocalFreePastPapers(cfg);
+        cb(cfg);
+      } else {
+        cb(fallback);
+      }
+    },
+    (err) => {
+      console.warn("Firestore freePastPapers fallback:", err.message);
+      cb(fallback);
+    }
+  );
+}
+
+/** Admin action: replace the whole Past Papers paywall config. */
+export async function saveFreePastPapers(cfg: FreePastPapersConfig): Promise<void> {
+  const cleaned = normalizeFreePastPapers(cfg);
+  setLocalFreePastPapers(cleaned);
+  await setDoc(doc(db, "settings", "freePastPapers"), cleaned);
+}
+
+/** True if this paper is open to everyone (its Block is free, or the paper itself is marked free). */
+export function isPastPaperFree(
+  cfg: FreePastPapersConfig | null,
+  paper: { id: string; block: number }
+): boolean {
+  if (!cfg) return true; // never configured -> no paywall
+  return cfg.blocks.includes(paper.block) || cfg.ids.includes(paper.id);
 }
 
 /* ------------------- Free subjects inside paid blocks ------------------- */
@@ -708,7 +908,7 @@ export interface QuestionInput {
  * that never reached the database still appeared to save fine in the admin's
  * own browser.
  */
-export type SaveResult = { source: "firestore" };
+export type SaveResult = { source: "firestore"; /** Existing MCQs with the same question text that were overwritten by the newer one. */ replaced?: number };
 
 export type SaveErrorReason = "permission-denied" | "offline" | "unknown";
 
@@ -757,15 +957,58 @@ function messageForReason(reason: SaveErrorReason, plural: boolean): string {
   return `${these} MCQ${plural ? "s" : ""} ${werent} saved — Firestore rejected the write for an unknown reason. Please try again.`;
 }
 
-export async function addQuestion(input: QuestionInput): Promise<SaveResult> {
-  const cleanInput = {
-    ...input,
-    status: input.status ?? "draft",
-    createdAt: Date.now(),
-  };
+/** Question text compared ignoring case and extra whitespace. */
+const normalizeQ = (t: string) => (t || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * Saves MCQs, REPLACING any existing MCQ whose question text matches (the newer one wins).
+ * - Matches are found in `existing` (the admin's loaded bank), ignoring case/spacing.
+ * - The OLDEST match is overwritten in place (so its id, and anything pointing at it, survives);
+ *   any further older copies are deleted so only one remains.
+ * - Duplicates inside the same batch collapse to the last one typed.
+ */
+async function saveReplacingDuplicates(inputs: QuestionInput[], existing: FirestoreQuestion[]): Promise<SaveResult> {
+  const latestByText = new Map<string, QuestionInput>();
+  inputs.forEach((i) => latestByText.set(normalizeQ(i.q), i));
+
+  const existingByText = new Map<string, FirestoreQuestion[]>();
+  existing.forEach((e) => {
+    const k = normalizeQ(e.q);
+    if (!latestByText.has(k)) return;
+    const list = existingByText.get(k) ?? [];
+    list.push(e);
+    existingByText.set(k, list);
+  });
+
+  type Op = { kind: "set"; id: string | null; data: QuestionInput } | { kind: "delete"; id: string };
+  const ops: Op[] = [];
+  let replaced = 0;
+  latestByText.forEach((input, k) => {
+    const matches = (existingByText.get(k) ?? []).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    ops.push({ kind: "set", id: matches[0]?.id ?? null, data: input });
+    if (matches.length) replaced++;
+    matches.slice(1).forEach((m) => ops.push({ kind: "delete", id: m.id }));
+  });
+
+  // Firestore batches hold at most 500 writes — stay well under it.
+  for (let i = 0; i < ops.length; i += 400) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + 400).forEach((op) => {
+      if (op.kind === "delete") {
+        batch.delete(doc(db, "questions", op.id));
+      } else {
+        const ref = op.id ? doc(db, "questions", op.id) : doc(collection(db, "questions"));
+        batch.set(ref, { ...op.data, status: op.data.status ?? "draft", createdAt: Date.now() });
+      }
+    });
+    await batch.commit();
+  }
+  return { source: "firestore", replaced };
+}
+
+export async function addQuestion(input: QuestionInput, existing: FirestoreQuestion[] = []): Promise<SaveResult> {
   try {
-    await addDoc(collection(db, "questions"), cleanInput);
-    return { source: "firestore" };
+    return await saveReplacingDuplicates([input], existing);
   } catch (err) {
     console.error("Firestore addQuestion failed:", err);
     const reason = classifyWriteError(err);
@@ -795,15 +1038,9 @@ export async function updateQuestion(id: string, input: QuestionInput): Promise<
   }
 }
 
-export async function bulkAddQuestions(inputs: QuestionInput[]): Promise<SaveResult> {
+export async function bulkAddQuestions(inputs: QuestionInput[], existing: FirestoreQuestion[] = []): Promise<SaveResult> {
   try {
-    const batch = writeBatch(db);
-    inputs.forEach((input) => {
-      const ref = doc(collection(db, "questions"));
-      batch.set(ref, { ...input, status: input.status ?? "draft", createdAt: Date.now() });
-    });
-    await batch.commit();
-    return { source: "firestore" };
+    return await saveReplacingDuplicates(inputs, existing);
   } catch (err) {
     console.error("Firestore bulkAddQuestions failed:", err);
     const reason = classifyWriteError(err);
@@ -1067,6 +1304,68 @@ export function subscribeScopedQuestions(
   );
 }
 
+/**
+ * Live view of PUBLISHED questions scoped to a Block + Module (optionally narrowed
+ * to one Subject), used by the Test Sessions "Add MCQs" builder.
+ *
+ * This deliberately mirrors subscribeScopedQuestions() above rather than going
+ * through fetchPublishedBlock()/fetchPublishedModuleExam(): those two are wrapped
+ * in cacheFirstFetch() with a 1-hour TTL, which is the right tradeoff for a student's
+ * practice session (instant repeat loads) but the wrong one here — an admin publishing
+ * MCQs and immediately trying to add them to a test would keep seeing a stale "0
+ * available" result for up to an hour, since a fresh-within-TTL cache entry is
+ * returned as-is with no background refresh. A live onSnapshot listener has no such
+ * staleness window: it reflects Firestore the moment a question's status flips to
+ * "published", exactly like the Manage MCQs screen does.
+ */
+export function subscribePublishedModuleQuestions(
+  block: number,
+  moduleId: string,
+  subjectId: string | null,
+  cb: (questions: FirestoreQuestion[]) => void,
+  onError?: (reason: "permission-denied" | "offline" | "unknown", message: string) => void
+) {
+  const deleted = getDeletedQuestionIds();
+  const clauses: QueryConstraint[] = [
+    where("moduleId", "==", moduleId),
+    where("block", "==", block),
+    where("status", "==", "published"),
+  ];
+  if (subjectId) clauses.push(where("subjectId", "==", subjectId));
+  const q = query(collection(db, "questions"), ...clauses);
+
+  const inScope = (fq: FirestoreQuestion) =>
+    fq.moduleId === moduleId && fq.block === block && fq.status === "published" && (!subjectId || fq.subjectId === subjectId);
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const fsQuestions = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
+        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
+      const localQs = getLocalQuestions().filter((lq) => lq.status === "published" && inScope(lq));
+      const defQuestions = DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && inScope(dq));
+      cb(mergeQuestionSources(defQuestions, localQs, fsQuestions));
+    },
+    (err) => {
+      console.warn("Firestore published-questions fallback:", err.message);
+      const localQs = getLocalQuestions().filter((lq) => lq.status === "published" && inScope(lq));
+      const defQuestions = DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && inScope(dq));
+      cb(mergeQuestionSources(defQuestions, localQs, []));
+
+      const reason = classifyWriteError(err);
+      onError?.(
+        reason,
+        reason === "permission-denied"
+          ? "Your account isn't a real Firestore admin yet, so published MCQs can't be listed — you're only seeing MCQs cached in this browser. Run scripts/setAdminClaim.mjs to fix this."
+          : reason === "offline"
+          ? "You appear to be offline — only locally cached MCQs are shown."
+          : "Couldn't load published MCQs from Firestore — only locally cached MCQs are shown."
+      );
+    }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Practice-session fetchers.
 //
@@ -1092,7 +1391,39 @@ function liveBankIfFresh(): FirestoreQuestion[] | null {
 
 // Old per-topic/per-difficulty cache entries are orphaned by the scope-level keys below;
 // clear them once so they stop eating localStorage quota.
-cachePurgePrefix(["pubBlock_", "pubModuleExam_", "pubBlockExam_"]);
+cachePurgePrefix(["pubBlock_", "pubModuleExam_", "pubBlockExam_", "idx_blockOutline_"]);
+
+/**
+ * Downloads one scope's questions as 4 parallel batches instead of one big request.
+ * The batches split the scope by document-id range, and the ranges together cover every
+ * possible id, so nothing is missed. Each batch is ~1/4 of the data, so a large scope
+ * arrives noticeably faster. If the batched query isn't allowed (e.g. an index issue), it
+ * quietly falls back to the original single query.
+ */
+// Firestore auto-ids are base62 (0-9, A-Z, a-z in ASCII order). The old 3 bounds ("E","M","U")
+// put ~50% of all ids (U..z incl. every lowercase letter) in the LAST batch, so the "4 parallel
+// batches" were really one big request plus three small ones. These 7 bounds cut the id space
+// into 8 near-equal slices so the downloads genuinely run in parallel.
+const ID_RANGE_BOUNDS = ["8", "G", "N", "V", "c", "k", "s"];
+async function fetchScopeInParallel(clauses: QueryConstraint[]): Promise<FirestoreQuestion[]> {
+  const toQuestions = (snap: Awaited<ReturnType<typeof getDocs>>) =>
+    snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+  try {
+    const b = ID_RANGE_BOUNDS;
+    const ranges: QueryConstraint[][] = [
+      [where(documentId(), "<", b[0])],
+      ...b.slice(0, -1).map((lo, i) => [where(documentId(), ">=", lo), where(documentId(), "<", b[i + 1])]),
+      [where(documentId(), ">=", b[b.length - 1])],
+    ];
+    const parts = await Promise.all(
+      ranges.map((r) => getDocs(query(collection(db, "questions"), ...clauses, ...r)))
+    );
+    return parts.flatMap(toQuestions);
+  } catch (err) {
+    console.warn("Parallel question fetch failed, using a single query instead:", err);
+    return toQuestions(await getDocs(query(collection(db, "questions"), ...clauses)));
+  }
+}
 
 async function fetchScopedBase(
   cacheKey: string,
@@ -1108,8 +1439,7 @@ async function fetchScopedBase(
       if (bank) {
         fsResults = bank.filter(inScope);
       } else {
-        const snap = await getDocs(query(collection(db, "questions"), ...clauses));
-        fsResults = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }));
+        fsResults = await fetchScopeInParallel(clauses);
       }
       const localQs = getLocalQuestions().filter((lq) => lq.status === "published" && inScope(lq));
       const defResults = DEFAULT_QUESTIONS.filter((dq) => dq.status === "published" && defaultInScope(dq));
@@ -1562,8 +1892,19 @@ export interface BlockOutline {
   }[];
 }
 
-function outlineFromQuestions(block: number, questions: FirestoreQuestion[]): BlockOutline {
+/** Everything the Block -> Module -> Subject -> Subheading screens need, for ONE block. */
+export interface BlockIndex {
+  block: number;
+  outline: BlockOutline;
+  /** key: `${moduleId}|${subjectId}` -> subheading names with question counts (sorted). */
+  topics: Record<string, { name: string; count: number }[]>;
+}
+
+export const topicIndexKey = (moduleId: string, subjectId: string) => `${moduleId}|${subjectId}`;
+
+function buildBlockIndex(block: number, questions: FirestoreQuestion[]): BlockIndex {
   const modules = new Map<string, BlockOutline["modules"][number]>();
+  const topicMaps = new Map<string, Map<string, number>>();
   let total = 0;
   questions.forEach((q) => {
     if (q.status !== "published" || q.block !== block) return;
@@ -1579,32 +1920,210 @@ function outlineFromQuestions(block: number, questions: FirestoreQuestion[]): Bl
     const subj = mod.subjects.find((s) => s.subjectId === q.subjectId);
     if (subj) subj.count++;
     else mod.subjects.push({ subjectId: q.subjectId, count: 1 });
+
+    const topic = (q.topicName || q.subheadingName || "").trim();
+    if (topic) {
+      const k = topicIndexKey(modId, q.subjectId);
+      const m = topicMaps.get(k) ?? new Map<string, number>();
+      m.set(topic, (m.get(topic) || 0) + 1);
+      topicMaps.set(k, m);
+    }
   });
-  return { block, total, modules: Array.from(modules.values()) };
+  const topics: BlockIndex["topics"] = {};
+  topicMaps.forEach((m, k) => {
+    topics[k] = Array.from(m.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  });
+  return { block, outline: { block, total, modules: Array.from(modules.values()) }, topics };
 }
 
-/** Module -> subject breakdown for ONE block, loaded when that block is selected. */
-export function subscribeBlockOutline(block: number, cb: (outline: BlockOutline) => void) {
-  const localOnly = () => outlineFromQuestions(block, localAndSeedPublished().filter((q) => q.block === block));
-  return cacheThenFetch<BlockOutline>(
-    `idx_blockOutline_${block}`,
+// Only these fields are ever needed to build the index. A full question document also carries the
+// stem, 4-5 options and a long explanation — typically 90%+ of the bytes.
+const INDEX_FIELDS = ["subjectId", "moduleId", "moduleName", "block", "topicName", "subheadingName", "status"];
+
+/**
+ * Downloads ONLY the index fields of a block's published questions using the Firestore REST
+ * `select` projection (the web SDK has no field projection, so it always pulls whole documents).
+ * Same security rules apply; a signed-in user's ID token is sent when available. Any failure
+ * (CORS, offline, timeout) throws so the caller can fall back to the SDK path.
+ */
+type SlimFilter = { field: string; value: string | number };
+async function fetchRowsSlim(filters: SlimFilter[], blockHint = 0): Promise<FirestoreQuestion[]> {
+  const projectId = app.options.projectId;
+  const apiKey = app.options.apiKey;
+  if (!projectId || !apiKey) throw new Error("missing firebase config");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  try {
+    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  } catch {
+    /* guest — rules allow reading published questions */
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(
+      `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:runQuery?key=${apiKey}`,
+      {
+        method: "POST",
+        headers,
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          structuredQuery: {
+            from: [{ collectionId: "questions" }],
+            select: { fields: INDEX_FIELDS.map((f) => ({ fieldPath: f })) },
+            where: {
+              compositeFilter: {
+                op: "AND",
+                filters: [
+                  { fieldFilter: { field: { fieldPath: "status" }, op: "EQUAL", value: { stringValue: "published" } } },
+                  ...filters.map((f) => ({
+                    fieldFilter: {
+                      field: { fieldPath: f.field },
+                      op: "EQUAL",
+                      value: typeof f.value === "number" ? { integerValue: String(f.value) } : { stringValue: f.value },
+                    },
+                  })),
+                ],
+              },
+            },
+          },
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(`runQuery ${res.status}`);
+    const rows = (await res.json()) as { document?: { name: string; fields?: Record<string, any> } }[];
+    const str = (f: any) => (f?.stringValue as string | undefined) ?? "";
+    return rows
+      .filter((r) => r.document)
+      .map((r) => {
+        const f = r.document!.fields ?? {};
+        return {
+          id: r.document!.name.split("/").pop() as string,
+          subjectId: str(f.subjectId),
+          moduleId: str(f.moduleId),
+          moduleName: str(f.moduleName),
+          block: Number(f.block?.integerValue ?? f.block?.doubleValue ?? blockHint),
+          topicName: str(f.topicName) || null,
+          subheadingName: str(f.subheadingName) || null,
+          status: "published",
+          difficulty: "medium",
+          q: "",
+          options: [],
+          correct: 0,
+          explanation: "",
+        } as FirestoreQuestion;
+      });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadBlockIndex(block: number): Promise<BlockIndex> {
+  const deleted = getDeletedQuestionIds();
+  let fsQuestions: FirestoreQuestion[];
+  try {
+    fsQuestions = await fetchRowsSlim([{ field: "block", value: block }], block);
+  } catch (err) {
+    console.warn("Slim index fetch failed, falling back to full documents:", err);
+    fsQuestions = await fetchScopeInParallel([where("status", "==", "published"), where("block", "==", block)]);
+  }
+  fsQuestions = fsQuestions.filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
+  const local = getLocalQuestions().filter((lq) => lq.status === "published" && lq.block === block);
+  const defs = DEFAULT_QUESTIONS.filter(
+    (dq) => dq.status === "published" && dq.block === block && !deleted.has(dq.id.toLowerCase().trim())
+  );
+  return buildBlockIndex(block, mergeQuestionSources(defs, local, fsQuestions));
+}
+
+/** How long a cached block index is trusted without hitting the network at all. */
+const BLOCK_INDEX_FRESH_MS = 5 * 60 * 1000;
+
+/**
+ * Module -> Subject -> Subheading breakdown for ONE block, in a single slim download. Cached
+ * (slim) on the device, so reopening a block is instant, and within 5 minutes costs no network.
+ */
+export function subscribeBlockIndex(
+  block: number,
+  cb: (index: BlockIndex) => void,
+  freshMs: number = BLOCK_INDEX_FRESH_MS,
+  onError?: (err: unknown) => void
+) {
+  const localOnly = () =>
+    buildBlockIndex(block, localAndSeedPublished().filter((q) => q.block === block));
+  return cacheThenFetch<BlockIndex>(`idx2_block_${block}`, () => loadBlockIndex(block), cb, onError ? undefined : localOnly, 7 * ONE_DAY, freshMs, onError);
+}
+
+export interface SubjectModuleRow {
+  block: number;
+  moduleId: string;
+  moduleName: string;
+  count: number;
+}
+
+/**
+ * Which Block/Module pairs teach one subject, with question counts — one slim, cached request.
+ * Replaces the old SubjectDetail behaviour of listening to the ENTIRE published question bank.
+ */
+export function subscribeSubjectModules(
+  subjectId: string,
+  cb: (rows: SubjectModuleRow[]) => void,
+  onError?: (err: unknown) => void
+) {
+  const aggregate = (qs: FirestoreQuestion[]): SubjectModuleRow[] => {
+    const map = new Map<string, SubjectModuleRow>();
+    qs.forEach((q) => {
+      if (q.status !== "published" || q.subjectId !== subjectId) return;
+      const name = q.moduleName || "General Module";
+      const moduleId = q.moduleId || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const key = `${q.block}-${moduleId}`;
+      const row = map.get(key) ?? { block: q.block, moduleId, moduleName: name, count: 0 };
+      row.count++;
+      map.set(key, row);
+    });
+    return Array.from(map.values());
+  };
+  return cacheThenFetch<SubjectModuleRow[]>(
+    `idx2_subject_${subjectId}`,
     async () => {
-      const snap = await getDocs(
-        query(collection(db, "questions"), where("status", "==", "published"), where("block", "==", block))
-      );
       const deleted = getDeletedQuestionIds();
-      const fsQuestions = snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<FirestoreQuestion, "id">) }))
-        .filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
-      const local = getLocalQuestions().filter((lq) => lq.status === "published" && lq.block === block);
-      const defs = DEFAULT_QUESTIONS.filter(
-        (dq) => dq.status === "published" && dq.block === block && !deleted.has(dq.id.toLowerCase().trim())
-      );
-      return outlineFromQuestions(block, mergeQuestionSources(defs, local, fsQuestions));
+      let fsQuestions: FirestoreQuestion[];
+      try {
+        fsQuestions = await fetchRowsSlim([{ field: "subjectId", value: subjectId }]);
+      } catch (err) {
+        console.warn("Slim subject fetch failed, falling back to full documents:", err);
+        fsQuestions = await fetchScopeInParallel([where("status", "==", "published"), where("subjectId", "==", subjectId)]);
+      }
+      fsQuestions = fsQuestions.filter((fq) => !deleted.has(fq.id.toLowerCase().trim()));
+      return aggregate(mergeQuestionSources([], getLocalQuestions().filter((lq) => lq.status === "published" && lq.subjectId === subjectId), fsQuestions));
     },
     cb,
-    localOnly
+    onError ? undefined : () => aggregate(localAndSeedPublished()),
+    7 * ONE_DAY,
+    BLOCK_INDEX_FRESH_MS,
+    onError
   );
+}
+
+/** Warms the block index so opening the block feels instant. Safe to call repeatedly. */
+export function prefetchBlockIndex(block: number) {
+  prefetchWhenIdle(() => {
+    subscribeBlockIndex(block, () => {});
+  });
+}
+
+/** Module -> subject breakdown for ONE block (kept for the admin screen and the legacy block page). */
+export function subscribeBlockOutline(block: number, cb: (outline: BlockOutline) => void) {
+  // freshMs = 0: always revalidate, so the admin screens never show a stale outline.
+  return subscribeBlockIndex(block, (idx) => cb(idx.outline), 0);
+}
+
+/** Warms the full question set of one subject (so tapping a subheading starts practice instantly). */
+export function prefetchSubjectQuestions(subjectId: string, moduleId: string, block: number) {
+  prefetchWhenIdle(() => {
+    fetchPublishedBlock(subjectId, moduleId, block).catch(() => {});
+  }, 2500);
 }
 
 export async function searchGlobalQuestions(queryText: string): Promise<FirestoreQuestion[]> {
@@ -1665,6 +2184,22 @@ export function subscribeAllUsers(cb: (users: UserProfile[]) => void) {
 export async function setUserUnlockedBlocks(uid: string, blocks: number[]) {
   const sorted = Array.from(new Set(blocks)).sort((a, b) => a - b);
   await updateDoc(doc(db, "users", uid), { unlockedBlocks: sorted });
+}
+
+/**
+ * Grants or revokes the per-account Test Series override — the "Test" toggle
+ * shown next to a student's Manually Unlocked Blocks. When granted, this
+ * account can open every published Test Session regardless of the global
+ * Test Series on/off switch and regardless of which Blocks/Subjects the test
+ * draws from.
+ */
+export async function setUserTestSeriesUnlocked(uid: string, unlocked: boolean) {
+  await updateDoc(doc(db, "users", uid), { testSeriesUnlocked: unlocked });
+}
+
+/** Grants or revokes the per-account Past Papers override — the "Past Papers" toggle in Manage Access. */
+export async function setUserPastPapersUnlocked(uid: string, unlocked: boolean) {
+  await updateDoc(doc(db, "users", uid), { pastPapersUnlocked: unlocked });
 }
 
 /** Grants or revokes premium (the full 1–15 bundle) for one account from the admin panel. */
