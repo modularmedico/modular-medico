@@ -5,6 +5,7 @@ import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import AiExplain from "../components/AiExplain";
+import ReviewPrompt from "../components/ReviewPrompt";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { SUBJECT_META } from "../data/subjects";
@@ -36,7 +37,12 @@ export default function Results() {
   const pct = Math.round((correct / answers.length) * 100);
   const scoreColor = pct >= 80 ? t.green : pct >= 50 ? t.gold : t.red;
   const isCustom = setRef.block === 0;
-  const isTest = setRef.moduleId.startsWith("test-");
+  const isTestOnly = setRef.moduleId.startsWith("test-");
+  const isMock = setRef.moduleId.startsWith("mock-");
+  // Tests and mock tests hold their answers back until the end, so the breakdown here is
+  // where the learner reviews each question (and asks the AI tutor).
+  const isTest = isTestOnly || isMock;
+  const reviewSource = isTestOnly ? "test" : isMock ? "mock" : "mcq";
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-6">
@@ -147,13 +153,22 @@ export default function Results() {
           full
           icon={RotateCcw}
           onClick={() =>
-            navigate(isTest ? "/tests" : isCustom ? "/builder" : `/subjects/${setRef.subjectId}/${setRef.moduleId}/${setRef.block}`)
+            navigate(
+              isMock
+                ? `/mock-tests/${setRef.block}`
+                : isTestOnly
+                ? "/tests"
+                : isCustom
+                ? "/builder"
+                : `/subjects/${setRef.subjectId}/${setRef.moduleId}/${setRef.block}`
+            )
           }
         >
-          {isTest ? "Back to tests" : "Practice again"}
+          {isMock ? "Back to mock tests" : isTestOnly ? "Back to tests" : "Practice again"}
         </Btn>
       </div>
-      {isTest && (
+      <ReviewPrompt source={reviewSource} context={`${setRef.setTitle} · ${setRef.moduleName}`} />
+      {isTestOnly && (
         <Btn
           t={t}
           variant="ghost"

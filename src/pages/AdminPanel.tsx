@@ -42,6 +42,8 @@ import {
   Archive,
   Link2,
   ListChecks,
+  ClipboardCheck,
+  MessageSquareHeart,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Card from "../components/Card";
@@ -120,6 +122,8 @@ import FreeSubjectsManager from "../components/admin/FreeSubjectsManager";
 import FreeTestsManager from "../components/admin/FreeTestsManager";
 import FreePastPapersManager from "../components/admin/FreePastPapersManager";
 import TestSessionsManager from "../components/admin/TestSessionsManager";
+import MockTestsManager from "../components/admin/MockTestsManager";
+import ReviewsManager from "../components/admin/ReviewsManager";
 import FirebaseUsagePanel from "../components/admin/FirebaseUsagePanel";
 import type { Difficulty, FirestoreLecture, FirestoreOspeBook, FirestoreStudyNote, FirestorePastPaper, FirestoreQuestion, QuestionStatus, SubheadingDoc, TopicDoc, UserProfile } from "../types";
 
@@ -135,6 +139,8 @@ const ADMIN_TABS = [
   { id: "add_past_paper", label: "Add Past Paper", icon: FileStack },
   { id: "manage_past_paper", label: "Manage Past Papers", icon: Archive },
   { id: "test_sessions", label: "Test Sessions", icon: ClipboardList },
+  { id: "mock_tests", label: "Mock Tests", icon: ClipboardCheck },
+  { id: "reviews", label: "Reviews", icon: MessageSquareHeart },
   { id: "manage_access", label: "Manage Access", icon: Users },
   { id: "site_stats", label: "Analytics", icon: BarChart3 },
   { id: "firebase_usage", label: "Firebase Usage", icon: HardDrive },
@@ -4234,6 +4240,10 @@ export default function AdminPanel() {
       {/* TAB: MANAGE ACCESS — per-account Block unlocks                        */}
       {/* ===================================================================== */}
       {activeTab === "test_sessions" && <TestSessionsManager t={t} />}
+
+      {activeTab === "mock_tests" && <MockTestsManager t={t} />}
+
+      {activeTab === "reviews" && <ReviewsManager t={t} />}
 
       {activeTab === "manage_access" && (
         <div className="flex flex-col gap-5">

@@ -145,6 +145,26 @@ export async function addBookmark(uid: string, subjectId: string, moduleName: st
   });
 }
 
+/**
+ * Saves an MCQ under a deterministic id (see utils/mcqKey.ts) so the same question can never be
+ * saved twice, from any screen. Callers check "already saved" first (the Firestore rules don't
+ * allow updating an existing bookmark).
+ */
+export async function saveMcq(uid: string, key: string, subjectId: string, moduleName: string, block: number, question: Omit<MCQ, "explanation"> & { explanation?: string }) {
+  await setDoc(doc(db, "users", uid, "bookmarks", key), {
+    subjectId,
+    moduleName,
+    block,
+    question: {
+      q: question.q,
+      options: question.options,
+      correct: question.correct,
+      explanation: question.explanation || "",
+    },
+    createdAt: Date.now(),
+  });
+}
+
 export async function removeBookmark(uid: string, bookmarkId: string) {
   await deleteDoc(doc(db, "users", uid, "bookmarks", bookmarkId));
 }

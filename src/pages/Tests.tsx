@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ChevronLeft, X, ClipboardList, Clock, HelpCircle, Play, Loader2, Lock, Unlock, Layers, BookOpen, Trophy, Timer } from "lucide-react";
+import { ChevronLeft, ChevronRight, ClipboardCheck, X, ClipboardList, Clock, HelpCircle, Play, Loader2, Lock, Unlock, Layers, BookOpen, Trophy, Timer } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import PaidTestModal from "../components/PaidTestModal";
+import { useStartGuard } from "../hooks/useStartGuard";
 import TestStartModal from "../components/TestStartModal";
 import TestLeaderboard from "../components/TestLeaderboard";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
@@ -60,6 +61,7 @@ export default function Tests() {
   // paywall entirely, same as it bypasses the global switch.
   const testSeriesUnlocked = useAppStore((s) => s.profile?.testSeriesUnlocked);
   const t = isDark ? THEME.dark : THEME.light;
+  const { guard, modal } = useStartGuard();
 
   const [tests, setTests] = useState<TestSessionDoc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -193,6 +195,11 @@ export default function Tests() {
       return;
     }
     setStartError(null);
+    // An unfinished MCQ-bank / mock session would be replaced by a test — ask before going on.
+    guard(() => proceedStart(test), test.name);
+  };
+
+  const proceedStart = async (test: TestSessionDoc) => {
 
     // Admins can preview any test freely — no lock, nothing written to the leaderboard.
     if (isAdmin) {
@@ -260,6 +267,24 @@ export default function Tests() {
         style={{ color: t.textMuted }}
       >
         <ChevronLeft size={15} /> {hasFilter ? "Subheadings" : "Test Sessions"}
+      </button>
+
+      {/* Mock Tests: Block 1-15 -> Mock Test 1, 2, ... */}
+      <button
+        onClick={() => navigate("/mock-tests")}
+        className="flex items-center gap-3 rounded-2xl p-4 text-left transition-all hover:scale-[1.01]"
+        style={{ backgroundColor: t.surface, border: `1.5px solid ${t.gold}`, boxShadow: `0 10px 28px -16px ${t.gold}` }}
+      >
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: `${t.gold}22` }}>
+          <ClipboardCheck size={22} color={t.gold} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 17 }}>Mock Tests</div>
+          <div className="text-xs" style={{ color: t.textMuted }}>
+            Block-wise full-length mock exams — Block 1 to 15, Mock Test 1, 2 and more.
+          </div>
+        </div>
+        <ChevronRight size={18} color={t.gold} />
       </button>
 
       <div>
@@ -472,6 +497,7 @@ export default function Tests() {
           onSubmit={(who) => confirmStart(detailsPrompt, who)}
         />
       )}
+      {modal}
       {paidPrompt && (
         <PaidTestModal
           testName={paidPrompt.name}

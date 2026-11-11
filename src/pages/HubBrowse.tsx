@@ -12,11 +12,13 @@ import {
   ClipboardList,
   FileStack,
   Layers,
+  ClipboardCheck,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import SubjectIcon from "../components/SubjectIcon";
+import ContinueBanner from "../components/ContinueBanner";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import { useAppStore, useCanAccessTestSeries, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { DEFAULT_BLOCK_DEFINITIONS, isSubjectId, type SubjectId } from "../data/subjects";
@@ -430,6 +432,31 @@ export default function HubBrowse() {
       >
         <ChevronLeft size={15} /> {backLabel}
       </button>
+
+      {/* Unfinished practice / past paper -> "continue from last time" (localStorage) */}
+      {kind === "mcqs" && <ContinueBanner kinds={["mcq"]} />}
+      {kind === "papers" && <ContinueBanner kinds={["paper"]} />}
+
+      {/* Test Sessions hub: Mock Tests (Block 1-15 -> Mock Test 1, 2, ...) live right alongside */}
+      {kind === "tests" && level === 0 && (
+        <Card
+          t={t}
+          onClick={() => navigate("/mock-tests")}
+          className="flex items-center gap-4 p-4 transition-all hover:scale-[1.01]"
+          style={{ border: `1.5px solid ${t.gold}`, boxShadow: `0 10px 28px -16px ${t.gold}` }}
+        >
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: `${t.gold}22` }}>
+            <ClipboardCheck size={24} color={t.gold} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 18 }}>Mock Tests</div>
+            <div style={{ color: t.textMuted, fontSize: 13, lineHeight: 1.4 }}>
+              Full-length, exam-style mock tests for every Block (1–15): Mock Test 1, Mock Test 2 and more.
+            </div>
+          </div>
+          <ArrowRight size={18} color={t.gold} />
+        </Card>
+      )}
 
       {/* Breadcrumb trail */}
       {level > 0 && (

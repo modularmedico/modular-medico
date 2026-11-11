@@ -14,6 +14,7 @@ import Practice from "./pages/Practice";
 const Subjects = lazy(() => import("./pages/Subjects"));
 const SubjectDetail = lazy(() => import("./pages/SubjectDetail"));
 const Tests = lazy(() => import("./pages/Tests"));
+const MockTests = lazy(() => import("./pages/MockTests"));
 const Search = lazy(() => import("./pages/Search"));
 const Results = lazy(() => import("./pages/Results"));
 const Builder = lazy(() => import("./pages/Builder"));
@@ -123,6 +124,8 @@ export default function App() {
           <Route path="/subjects/:subjectId/:moduleId/:block" element={<PracticeSetup />} />
           <Route path="/practice" element={<Practice />} />
           <Route path="/tests" element={<Tests />} />
+          <Route path="/mock-tests" element={<MockTests />} />
+          <Route path="/mock-tests/:block" element={<MockTests />} />
           <Route path="/search" element={<Search />} />
           <Route path="/results" element={<Results />} />
           <Route path="/builder" element={<Builder />} />

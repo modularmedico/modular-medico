@@ -11,12 +11,14 @@ import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { SUBJECT_LIST, SUBJECT_META } from "../data/subjects";
 import { db } from "../firebase";
 import { DEFAULT_QUESTIONS } from "../data/defaultCurriculum";
+import { useStartGuard } from "../hooks/useStartGuard";
 import type { FirestoreQuestion, PracticeConfig } from "../types";
 
 export default function Builder() {
   const navigate = useNavigate();
   const isDark = useAppStore((s) => s.isDark);
   const startSession = useAppStore((s) => s.startSession);
+  const { guard, modal } = useStartGuard();
   const isLoggedIn = useIsLoggedIn();
   const isPremium = useIsPremium();
   const t = isDark ? THEME.dark : THEME.light;
@@ -62,18 +64,20 @@ export default function Builder() {
     if (!isPremium || available.length === 0) return;
     const shuffled = [...available].sort(() => Math.random() - 0.5).slice(0, count);
     const config: PracticeConfig = { mode: "traditional", timing: timeLimit ? "timed" : "untimed", spacedRep: true, difficultyFilter: "all" };
-    startSession(
-      {
-        subjectId: picked[0] || SUBJECT_LIST[0],
-        moduleId: "custom",
-        moduleName: "Custom quiz",
-        block: 0,
-        setTitle: "Custom quiz",
-        questions: shuffled.map((q) => ({ q: q.q, options: q.options, correct: q.correct, explanation: q.explanation })),
-      },
-      config
-    );
-    navigate("/practice");
+    guard(() => {
+      startSession(
+        {
+          subjectId: picked[0] || SUBJECT_LIST[0],
+          moduleId: "custom",
+          moduleName: "Custom quiz",
+          block: 0,
+          setTitle: "Custom quiz",
+          questions: shuffled.map((q) => ({ q: q.q, options: q.options, correct: q.correct, explanation: q.explanation })),
+        },
+        config
+      );
+      navigate("/practice");
+    }, "a custom quiz");
   };
 
   return (
@@ -145,6 +149,7 @@ export default function Builder() {
       <Btn t={t} full icon={loading ? Loader2 : Wand2} spin={loading} disabled={!isPremium || available.length === 0 || loading} onClick={generate}>
         Generate quiz
       </Btn>
+      {modal}
     </div>
   );
 }

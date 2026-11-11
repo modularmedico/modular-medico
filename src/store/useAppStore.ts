@@ -14,7 +14,21 @@ export interface QuizSession {
   requeueCount: Record<number, number>;
   /** Original question indices the learner explicitly skipped, for the "Review skipped" jump list. */
   skipped: Record<number, boolean>;
+  /** Original question indices whose answer was revealed with "Show answer" (without picking an option). */
+  revealed?: Record<number, boolean>;
+  /** Seconds left on the clock when the learner last left, so a resumed session carries on from there. */
+  secondsLeft?: number | null;
 }
+
+/**
+ * True when a persisted session has real progress worth offering to resume — i.e. the learner
+ * answered/skipped something or moved past the first question. A session that was just created
+ * and never touched is silently replaced instead of triggering the "continue?" prompt.
+ */
+export const isSessionResumable = (s: QuizSession | null | undefined): s is QuizSession =>
+  !!s && s.queue.length > 0 &&
+  // Test Series attempts are timed + leaderboard-tracked (2h retake lock), so they are never resumable.
+  !s.setRef.moduleId.startsWith("test-") && (s.pos > 0 || Object.keys(s.record).length > 0 || Object.keys(s.revealed ?? {}).length > 0);
 
 interface AppState {
   isDark: boolean;
@@ -136,6 +150,8 @@ export const useAppStore = create<AppState>()(
             bookmarked: {},
             requeueCount: {},
             skipped: {},
+            revealed: {},
+            secondsLeft: undefined,
           },
         }),
       updateSession: (patch) => {

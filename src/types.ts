@@ -344,3 +344,65 @@ export interface TestLeaderboardEntry {
   timeTakenSec: number;
   attempts: number;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Reviews                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** Where a student was when they left a review. */
+export type ReviewSource = "mcq" | "past_paper" | "test" | "mock";
+
+/**
+ * A student review, stored in the Firestore `reviews` collection. Students can only create
+ * them (always `featured: false`); an admin decides which ones (max 5) appear on the homepage.
+ */
+export interface ReviewDoc {
+  id: string;
+  uid: string;
+  displayName: string;
+  rating: number; // 1..5
+  text: string;
+  source: ReviewSource;
+  /** Title of the set/paper/test the review was left after, e.g. "Block 3 · Cardiovascular-I". */
+  context: string;
+  /** True when an admin picked this review for the homepage. */
+  featured: boolean;
+  /** Admin-chosen ordering on the homepage (ms timestamp of when it was featured). */
+  featuredAt?: number | null;
+  createdAt: number;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Mock tests                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A Mock Test, stored in the Firestore `mock_tests` collection. It has exactly the shape of a
+ * Test Session (so the admin can reuse the same "add MCQs from the bank" builder) plus the
+ * Block (1..15) it belongs to and a display order, which gives "Mock Test 1", "Mock Test 2"...
+ */
+export interface MockTestDoc extends TestSessionDoc {
+  block: number; // 1..15
+  order: number; // 1-based position inside the block
+}
+
+/* -------------------------------------------------------------------------- */
+/* Practice progress (continue where you left off)                            */
+/* -------------------------------------------------------------------------- */
+
+/** Saved progress inside one Past Paper's MCQs, kept in localStorage. */
+export interface PaperProgress {
+  paperId: string;
+  title: string;
+  block: number;
+  /** Subheading the paper lives under (needed to rebuild its URL). */
+  topic: string;
+  /** Index of the MCQ the student was on. */
+  index: number;
+  /** Picked option per MCQ index. */
+  answers: Record<number, number>;
+  /** MCQs whose answer was revealed with "Show answer" without picking an option. */
+  revealed: Record<number, boolean>;
+  total: number;
+  updatedAt: number;
+}

@@ -16,7 +16,7 @@ import {
   setTestSessionStatus,
   subscribeAllTestSessions,
 } from "../../services/testSessions";
-import type { Difficulty, FirestoreQuestion, QuestionStatus, TestSessionDoc, TestSessionQuestion } from "../../types";
+import type { Difficulty, FirestoreQuestion, QuestionStatus, TestSessionDoc, TestSessionQuestion, TestSessionSource } from "../../types";
 
 const NO_TOPIC = "General / No topic";
 const topicOf = (q: FirestoreQuestion) => q.topicName || q.subheadingName || NO_TOPIC;
@@ -243,14 +243,24 @@ export default function TestSessionsManager({ t }: { t: ThemeTokens }) {
 /* Add-MCQs builder + contents of one test                                     */
 /* -------------------------------------------------------------------------- */
 
-function TestEditor({
+/**
+ * Also used by the Mock Tests admin tab: a mock test has the same shape as a test session, so it
+ * passes its own save functions through `onAdd` / `onRemove` and reuses this whole builder.
+ */
+export function TestEditor({
   t,
   test,
   onNotice,
+  onAdd = addQuestionsToTestSession,
+  onRemove = removeQuestionFromTestSession,
+  noun = "test",
 }: {
   t: ThemeTokens;
   test: TestSessionDoc;
   onNotice: (n: { tone: "ok" | "err"; text: string } | null) => void;
+  onAdd?: (test: TestSessionDoc, added: TestSessionQuestion[], source: TestSessionSource) => Promise<void>;
+  onRemove?: (test: TestSessionDoc, sourceId: string) => Promise<void>;
+  noun?: string;
 }) {
   // Filters — deliberately the same shape as the Manage MCQs screen (Block,
   // Module, Subject, Difficulty, Status, Subheading, search), and Block + Module
@@ -385,7 +395,7 @@ function TestEditor({
         block: q.block,
         topicName: q.topicName || q.subheadingName || null,
       }));
-      await addQuestionsToTestSession(test, snapshot, {
+      await onAdd(test, snapshot, {
         block,
         moduleName,
         subjectId: subjectId || null,
@@ -403,7 +413,7 @@ function TestEditor({
 
   const handleRemove = async (sourceId: string) => {
     try {
-      await removeQuestionFromTestSession(test, sourceId);
+      await onRemove(test, sourceId);
     } catch (e) {
       onNotice({ tone: "err", text: e instanceof Error ? e.message : "Couldn't remove that MCQ." });
     }
@@ -602,7 +612,7 @@ function TestEditor({
           disabled={selected.size === 0 || adding}
           onClick={handleAdd}
         >
-          Add {selected.size > 0 ? selected.size : ""} MCQ{selected.size !== 1 ? "s" : ""} to test
+          Add {selected.size > 0 ? selected.size : ""} MCQ{selected.size !== 1 ? "s" : ""} to {noun}
         </Btn>
       </div>
 
@@ -610,7 +620,7 @@ function TestEditor({
       <div className="flex flex-col gap-3 border-t pt-4" style={{ borderColor: t.border }}>
         <div className="flex items-center justify-between">
           <h3 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>
-            In this test ({test.questions.length})
+            In this {noun} ({test.questions.length})
           </h3>
           {test.questions.length > 0 && (
             <button onClick={() => setShowList(!showList)} className="text-xs font-bold" style={{ color: t.teal }}>

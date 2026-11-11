@@ -18,6 +18,8 @@ import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import Segmented from "../components/Segmented";
 import Toggle from "../components/Toggle";
+import ContinueBanner from "../components/ContinueBanner";
+import { useStartGuard } from "../hooks/useStartGuard";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore, useIsLoggedIn, useIsBlockUnlocked, useIsSubjectUnlocked } from "../store/useAppStore";
 import { SUBJECT_META, isSubjectId, DEFAULT_BLOCK_DEFINITIONS, type BlockDefinition } from "../data/subjects";
@@ -55,6 +57,7 @@ export default function PracticeSetup() {
   const startSession = useAppStore((s) => s.startSession);
   const isLoggedIn = useIsLoggedIn();
   const t = isDark ? THEME.dark : THEME.light;
+  const { guard, modal } = useStartGuard();
 
   const [blockDefs, setBlockDefs] = useState<BlockDefinition[]>(DEFAULT_BLOCK_DEFINITIONS);
   const [mode, setMode] = useState<"traditional" | "omr" | "exam">("traditional");
@@ -430,22 +433,26 @@ export default function PracticeSetup() {
           selectedTopic ? ` \u00b7 ${selectedTopic.name}` : ""
         }`;
 
-    startSession(
-      {
-        subjectId: isFullBlock || isModuleExam ? "all" : subjectId,
-        moduleId: isFullBlock ? `block-${block}-all` : moduleId,
-        moduleName: moduleDisplayName,
-        block,
-        setTitle: title,
-        questions: questions.map((q) => ({ q: q.q, options: q.options, correct: q.correct, explanation: q.explanation })),
-      },
-      config
-    );
-    navigate("/practice");
+    // An earlier session is still unfinished? Ask whether to continue it or start over.
+    guard(() => {
+      startSession(
+        {
+          subjectId: isFullBlock || isModuleExam ? "all" : subjectId,
+          moduleId: isFullBlock ? `block-${block}-all` : moduleId,
+          moduleName: moduleDisplayName,
+          block,
+          setTitle: title,
+          questions: questions.map((q) => ({ q: q.q, options: q.options, correct: q.correct, explanation: q.explanation })),
+        },
+        config
+      );
+      navigate("/practice");
+    }, title);
   };
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-5">
+      <ContinueBanner kinds={["mcq"]} />
       {/* Clean Back Link (Requirement 7) */}
       <button
         onClick={() => navigate("/subjects?view=block")}
@@ -789,6 +796,7 @@ export default function PracticeSetup() {
           It may take 1-2 minutes when loading first time
         </p>
       )}
+      {modal}
     </div>
   );
 }

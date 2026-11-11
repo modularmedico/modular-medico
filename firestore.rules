@@ -110,6 +110,34 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // Mock Tests (Block 1-15 -> Mock Test 1, 2...): same access pattern as test_sessions —
+    // students read only published ones (query must filter status == 'published'),
+    // admins read/write everything.
+    match /mock_tests/{mockId} {
+      allow get, list: if resource.data.status == 'published' || isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------
+    // Student reviews, sent from the end of a practice session / past paper / test.
+    // Any signed-in student can CREATE one (always un-featured, only their own uid).
+    // Only reviews an admin marked `featured` are publicly readable (homepage shows
+    // up to 5 — the query must filter featured == true); admins read, feature, delete.
+    // ---------------------------------------------------------------
+    match /reviews/{reviewId} {
+      allow get, list: if resource.data.featured == true || isAdmin();
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.featured == false
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+        && request.resource.data.text is string && request.resource.data.text.size() <= 600
+        && request.resource.data.displayName is string && request.resource.data.displayName.size() <= 60
+        && request.resource.data.source in ['mcq', 'past_paper', 'test', 'mock']
+        && request.resource.data.keys().hasOnly(['uid', 'displayName', 'rating', 'text', 'source', 'context', 'featured', 'featuredAt', 'createdAt']);
+      allow update, delete: if isAdmin();
+    }
+
     // ---------------------------------------------------------------
     // Test Series leaderboard + retake cooldown. One doc per (test, student):
     // test_leaderboard/{testId}_{uid}. Any signed-in student can read the board.

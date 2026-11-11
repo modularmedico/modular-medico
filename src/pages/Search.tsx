@@ -8,12 +8,14 @@ import type { FirestoreQuestion, PracticeConfig } from "../types";
 import Card from "../components/Card";
 import Btn from "../components/Btn";
 import Pill from "../components/Pill";
+import { useStartGuard } from "../hooks/useStartGuard";
 
 export default function Search() {
   const navigate = useNavigate();
   const isDark = useAppStore((s) => s.isDark);
   const t = isDark ? THEME.dark : THEME.light;
   const startSession = useAppStore((s) => s.startSession);
+  const { guard, modal } = useStartGuard();
 
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -53,18 +55,20 @@ export default function Search() {
       spacedRep: true,
       difficultyFilter: "all"
     };
-    startSession(
-      {
-        subjectId: "search",
-        moduleId: "global-search",
-        moduleName: "Global Search",
-        block: 0,
-        setTitle: `Search Results: "${query}"`,
-        questions: results
-      },
-      config
-    );
-    navigate("/practice");
+    guard(() => {
+      startSession(
+        {
+          subjectId: "search",
+          moduleId: "global-search",
+          moduleName: "Global Search",
+          block: 0,
+          setTitle: `Search Results: "${query}"`,
+          questions: results
+        },
+        config
+      );
+      navigate("/practice");
+    }, `the search results for "${query}"`);
   };
 
   return (
@@ -130,6 +134,7 @@ export default function Search() {
           </div>
         )}
       </div>
+      {modal}
     </div>
   );
 }

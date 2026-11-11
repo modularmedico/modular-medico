@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Sparkles,
@@ -25,10 +25,15 @@ import {
   Crown,
   ClipboardList,
   FileStack,
+  Star,
+  Quote,
 } from "lucide-react";
 import Pill from "../components/Pill";
 import Card from "../components/Card";
 import Btn from "../components/Btn";
+import ContinueBanner from "../components/ContinueBanner";
+import { subscribeFeaturedReviews } from "../services/reviews";
+import type { ReviewDoc } from "../types";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { SUBJECT_LIST, SUBJECT_META } from "../data/subjects";
@@ -127,9 +132,15 @@ export default function Home() {
   const isPremium = useIsPremium();
   const t = isDark ? THEME.dark : THEME.light;
   const [openFaq, setOpenFaq] = useState(0);
+  // Up to 5 reviews hand-picked by the admin (Admin > Reviews > "Show on homepage").
+  const [reviews, setReviews] = useState<ReviewDoc[]>([]);
+  useEffect(() => subscribeFeaturedReviews(setReviews), []);
 
   return (
     <div className="flex flex-col gap-16 pb-8">
+      {/* Unfinished MCQ practice / past paper -> one tap to pick it back up (localStorage) */}
+      <ContinueBanner kinds={["mcq", "paper"]} />
+
       {/* First thing students see: the 3 main boxes */}
       <section className="flex flex-col gap-4">
         <div>
@@ -427,6 +438,40 @@ export default function Home() {
           </Btn>
         </Card>
       </section>
+
+      {/* Student reviews — only the ones an admin picked, max 5 */}
+      {reviews.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <div>
+            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: t.teal }}>
+              Student Reviews
+            </span>
+            <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 22, marginTop: 3 }}>
+              What students say about Modular Medico
+            </h2>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {reviews.map((r) => (
+              <Card key={r.id} t={t} className="flex flex-col gap-3 p-5" style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-0.5" aria-label={`${r.rating} out of 5 stars`}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <Star key={n} size={15} color={t.gold} fill={n <= r.rating ? t.gold : "transparent"} />
+                    ))}
+                  </div>
+                  <Quote size={18} color={`${t.teal}88`} />
+                </div>
+                <p style={{ color: t.textMuted, fontSize: 14, lineHeight: 1.6 }}>
+                  {r.text || "Loved practicing on Modular Medico!"}
+                </p>
+                <div className="mt-auto text-sm font-bold" style={{ fontFamily: FONT_DISPLAY }}>
+                  {r.displayName}
+                </div>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Frequently Asked Questions */}
       <section className="flex flex-col gap-4">

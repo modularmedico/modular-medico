@@ -1,20 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ChevronLeft, FileStack, FolderTree, X, ExternalLink, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
+import { ChevronLeft, FileStack, FolderTree, X, ExternalLink, ChevronRight, CheckCircle2, XCircle, Eye, Flag, RotateCcw, PartyPopper } from "lucide-react";
 import Spinner from "../components/Spinner";
 import AiExplain from "../components/AiExplain";
+import SaveMcqButton from "../components/SaveMcqButton";
+import ReviewPrompt from "../components/ReviewPrompt";
+import ResumeModal from "../components/ResumeModal";
+import ContinueBanner from "../components/ContinueBanner";
+import Btn from "../components/Btn";
+import { useSavedMcqs } from "../hooks/useSavedMcqs";
+import { mcqKey } from "../utils/mcqKey";
+import {
+  clearPaperProgress,
+  getPaperProgress,
+  latestPaperProgress,
+  paperHasProgress,
+  paperResumeUrl,
+  savePaperProgress,
+} from "../utils/resume";
 import { THEME, FONT_DISPLAY } from "../theme";
 import { useAppStore, useIsLoggedIn, useIsPaperBlockUnlocked } from "../store/useAppStore";
 import { paperIsPlaceable } from "./hubShared";
 import { subscribePublishedPastPapers, toDrivePreviewUrl } from "../services/pastPapers";
-import type { FirestorePastPaper } from "../types";
+import type { FirestorePastPaper, PaperProgress } from "../types";
 
 /** Past Papers for one (Block, Subheading) pair — the actual list of exam papers. */
 export default function PastPaperList() {
   const navigate = useNavigate();
   const { block: blockParam = "" } = useParams();
   const blockNum = Number(blockParam);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const fTopic = searchParams.get("topic") || undefined;
 
   const isDark = useAppStore((s) => s.isDark);
@@ -29,23 +44,44 @@ export default function PastPaperList() {
   // Quiz state — only used when the active paper has manually-entered MCQs
   // instead of (or alongside) a Google Drive link.
   const [mcqIndex, setMcqIndex] = useState(0);
-  const [mcqSelected, setMcqSelected] = useState<number | null>(null);
+  // Picked option per MCQ index, and which MCQs had "Show answer" tapped. Both are saved to
+  // localStorage so a student can leave mid-paper and continue from the same question later.
+  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [revealed, setRevealed] = useState<Record<number, boolean>>({});
+  const [finished, setFinished] = useState(false);
+  // Waiting on the student's "continue or start over?" choice before opening a paper.
+  const [resumePrompt, setResumePrompt] = useState<{ paper: FirestorePastPaper; prog: PaperProgress; same: boolean } | null>(null);
+  const saved = useSavedMcqs();
 
-  const openPaper = (p: FirestorePastPaper) => {
-    setActivePaper(p);
-    setMcqIndex(0);
-    setMcqSelected(null);
+  const resetViewer = (paper: FirestorePastPaper | null, from?: PaperProgress | null) => {
+    setActivePaper(paper);
+    setMcqIndex(from ? Math.min(from.index, Math.max(0, (paper?.mcqs?.length ?? 1) - 1)) : 0);
+    setAnswers(from?.answers ?? {});
+    setRevealed(from?.revealed ?? {});
+    setFinished(false);
   };
 
-  const closePaper = () => {
-    setActivePaper(null);
-    setMcqIndex(0);
-    setMcqSelected(null);
-  };
+  const closePaper = () => resetViewer(null);
 
-  const goToMcq = (idx: number) => {
-    setMcqIndex(idx);
-    setMcqSelected(null);
+  const goToMcq = (idx: number) => setMcqIndex(idx);
+
+  // Tapping a paper: if it (or another paper) has unfinished progress, ask first.
+  const pickPaper = (p: FirestorePastPaper) => {
+    if (!p.mcqs || p.mcqs.length === 0) {
+      resetViewer(p);
+      return;
+    }
+    const own = getPaperProgress(p.id);
+    if (paperHasProgress(own)) {
+      setResumePrompt({ paper: p, prog: own, same: true });
+      return;
+    }
+    const other = latestPaperProgress();
+    if (other && other.paperId !== p.id) {
+      setResumePrompt({ paper: p, prog: other, same: false });
+      return;
+    }
+    resetViewer(p);
   };
 
   useEffect(() => {
@@ -64,9 +100,44 @@ export default function PastPaperList() {
     [allPapers, blockNum, fTopic]
   );
 
+  const activeMcqsForSave = activePaper?.mcqs || [];
+
+  // Keep the student's place in localStorage while a paper with MCQs is open, so leaving halfway
+  // (closing the paper, the tab, or the whole app) can be continued later from the same MCQ.
+  useEffect(() => {
+    if (!activePaper || finished || activeMcqsForSave.length === 0) return;
+    savePaperProgress({
+      paperId: activePaper.id,
+      title: activePaper.description || activePaper.title,
+      block: blockNum,
+      topic: fTopic || "",
+      index: mcqIndex,
+      answers,
+      revealed,
+      total: activeMcqsForSave.length,
+      updatedAt: Date.now(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePaper, mcqIndex, answers, revealed, finished]);
+
+  // Arriving from a "Continue" banner (?resume=<paperId>): reopen that paper where it was left.
+  const resumeId = searchParams.get("resume");
+  useEffect(() => {
+    if (!resumeId || !loaded || activePaper) return;
+    const paper = papers.find((p) => p.id === resumeId);
+    const prog = getPaperProgress(resumeId);
+    if (paper && paper.mcqs && paper.mcqs.length > 0) resetViewer(paper, prog);
+    // Drop the param so closing the paper doesn't reopen it.
+    const next = new URLSearchParams(searchParams);
+    next.delete("resume");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeId, loaded, papers]);
+
   const previewUrl = activePaper?.driveUrl ? toDrivePreviewUrl(activePaper.driveUrl) : null;
   const activeMcqs = activePaper?.mcqs || [];
   const currentMcq = activeMcqs[mcqIndex];
+  const mcqSelected: number | null = answers[mcqIndex] ?? null;
 
   // This Block's Past Papers are paywalled (direct links included).
   if (Number.isInteger(blockNum) && !paperBlockOpen) {
@@ -98,6 +169,8 @@ export default function PastPaperList() {
       >
         <ChevronLeft size={15} /> Block {blockNum}
       </button>
+
+      <ContinueBanner kinds={["paper"]} />
 
       <div>
         <span
@@ -139,7 +212,7 @@ export default function PastPaperList() {
           {papers.map((p) => (
             <button
               key={p.id}
-              onClick={() => openPaper(p)}
+              onClick={() => pickPaper(p)}
               className="flex items-center gap-3 rounded-xl p-3 text-left transition-all hover:scale-[1.01]"
               style={{ backgroundColor: t.surfaceAlt, border: `1px solid ${t.border}` }}
             >
@@ -163,6 +236,34 @@ export default function PastPaperList() {
             </button>
           ))}
         </div>
+      )}
+
+      {/* "Continue or start over?" popup */}
+      {resumePrompt && (
+        <ResumeModal
+          t={t}
+          title={resumePrompt.prog.title}
+          progress={`Question ${Math.min(resumePrompt.prog.index + 1, resumePrompt.prog.total)} of ${resumePrompt.prog.total}`}
+          description={
+            resumePrompt.same
+              ? "You already started this paper. Pick up from the question you stopped at, or begin it again from the start."
+              : `You have another paper in progress. Starting "${resumePrompt.paper.description || resumePrompt.paper.title}" will replace it.`
+          }
+          startOverLabel={resumePrompt.same ? "Start this paper over" : "Start the new paper"}
+          onClose={() => setResumePrompt(null)}
+          onContinue={() => {
+            const { paper, prog, same } = resumePrompt;
+            setResumePrompt(null);
+            if (same) resetViewer(paper, prog);
+            else navigate(paperResumeUrl(prog));
+          }}
+          onStartOver={() => {
+            const { paper, prog } = resumePrompt;
+            setResumePrompt(null);
+            clearPaperProgress(prog.paperId);
+            resetViewer(paper);
+          }}
+        />
       )}
 
       {/* PDF Preview Modal */}
@@ -200,7 +301,40 @@ export default function PastPaperList() {
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {activeMcqs.length > 0 && currentMcq ? (
+            {activeMcqs.length > 0 && finished ? (
+              <div className="mx-auto flex max-w-2xl flex-col gap-4 p-5">
+                {(() => {
+                  const picked = Object.keys(answers).length;
+                  const correctCount = activeMcqs.filter((m, i) => answers[i] === m.correct).length;
+                  const pct = picked > 0 ? Math.round((correctCount / activeMcqs.length) * 100) : 0;
+                  return (
+                    <div
+                      className="flex flex-col items-center gap-2 rounded-2xl p-6 text-center"
+                      style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}
+                    >
+                      <PartyPopper size={28} color={t.gold} />
+                      <h4 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 20 }}>Paper complete</h4>
+                      <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 44, color: pct >= 80 ? t.green : pct >= 50 ? t.gold : t.red, lineHeight: 1 }}>
+                        {pct}%
+                      </div>
+                      <p className="text-sm" style={{ color: t.textMuted }}>
+                        {correctCount} correct out of {activeMcqs.length} MCQs
+                        {picked < activeMcqs.length ? ` · ${activeMcqs.length - picked} unanswered` : ""}
+                      </p>
+                    </div>
+                  );
+                })()}
+                <ReviewPrompt source="past_paper" context={`Block ${blockNum} · ${fTopic ?? ""} · ${activePaper.description || activePaper.title}`} />
+                <div className="flex gap-3">
+                  <Btn t={t} variant="ghost" full icon={RotateCcw} onClick={() => resetViewer(activePaper)}>
+                    Try again
+                  </Btn>
+                  <Btn t={t} full onClick={closePaper}>
+                    Done
+                  </Btn>
+                </div>
+              </div>
+            ) : activeMcqs.length > 0 && currentMcq ? (
               <div className="mx-auto flex max-w-2xl flex-col gap-4 p-5">
                 <div className="flex items-center gap-3">
                   <span className="shrink-0 whitespace-nowrap text-xs font-bold" style={{ color: t.textMuted }}>
@@ -241,28 +375,28 @@ export default function PastPaperList() {
                   {currentMcq.options.map((opt, optIdx) => {
                     const isCorrect = optIdx === currentMcq.correct;
                     const isPicked = optIdx === mcqSelected;
-                    const revealed = mcqSelected !== null;
+                    const showAns = mcqSelected !== null || !!revealed[mcqIndex];
                     return (
                       <button
                         key={optIdx}
-                        onClick={() => setMcqSelected(optIdx)}
-                        disabled={revealed}
+                        onClick={() => setAnswers((prev) => ({ ...prev, [mcqIndex]: optIdx }))}
+                        disabled={showAns}
                         className="flex items-center justify-between gap-2 rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold transition-all"
                         style={{
-                          backgroundColor: revealed && isCorrect ? `${t.green}20` : revealed && isPicked ? `${t.red}15` : t.surfaceAlt,
-                          border: `1.5px solid ${revealed && isCorrect ? t.green : revealed && isPicked ? t.red : t.border}`,
-                          color: revealed && isCorrect ? t.green : revealed && isPicked ? t.red : t.text,
+                          backgroundColor: showAns && isCorrect ? `${t.green}20` : showAns && isPicked ? `${t.red}15` : t.surfaceAlt,
+                          border: `1.5px solid ${showAns && isCorrect ? t.green : showAns && isPicked ? t.red : t.border}`,
+                          color: showAns && isCorrect ? t.green : showAns && isPicked ? t.red : t.text,
                         }}
                       >
                         <span>{opt}</span>
-                        {revealed && isCorrect && <CheckCircle2 size={16} />}
-                        {revealed && isPicked && !isCorrect && <XCircle size={16} />}
+                        {showAns && isCorrect && <CheckCircle2 size={16} />}
+                        {showAns && isPicked && !isCorrect && <XCircle size={16} />}
                       </button>
                     );
                   })}
                 </div>
 
-                {mcqSelected !== null && currentMcq.explanation && (
+                {(mcqSelected !== null || revealed[mcqIndex]) && currentMcq.explanation && (
                   <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}>
                     {currentMcq.explanation}
                   </div>
@@ -281,23 +415,71 @@ export default function PastPaperList() {
                   </div>
                 )}
 
-                <div className="mt-2 flex items-center justify-between">
+                {/* Prominent Save MCQ — saved MCQs live on the Saved page */}
+                <SaveMcqButton
+                  t={t}
+                  full
+                  saved={saved.isSaved(currentMcq)}
+                  busy={saved.busyKey === mcqKey(currentMcq)}
+                  onClick={() =>
+                    saved.toggle(currentMcq, {
+                      subjectId: "past-paper",
+                      moduleName: activePaper.description || activePaper.title,
+                      block: blockNum,
+                    })
+                  }
+                />
+                {saved.needsLogin && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 text-xs" style={{ backgroundColor: `${t.gold}20`, border: `1.5px solid ${t.gold}` }}>
+                    <span>Log in to save MCQs and find them later on the Saved page.</span>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <button onClick={saved.goLogin} className="font-bold" style={{ color: t.teal }}>Log in</button>
+                      <button onClick={saved.dismissLogin} aria-label="Dismiss" style={{ color: t.textFaint }}><X size={14} /></button>
+                    </div>
+                  </div>
+                )}
+                {saved.error && (
+                  <div className="rounded-xl px-3.5 py-2.5 text-xs" style={{ backgroundColor: `${t.red}18`, color: t.red }}>{saved.error}</div>
+                )}
+
+                {/* Previous · Show answer · Next */}
+                <div className="mt-1 grid grid-cols-3 items-center gap-2">
                   <button
                     onClick={() => goToMcq(Math.max(0, mcqIndex - 1))}
                     disabled={mcqIndex === 0}
-                    className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-40"
+                    className="flex items-center justify-center gap-1 rounded-lg px-3 py-2.5 text-xs font-bold disabled:opacity-40"
                     style={{ backgroundColor: t.surfaceAlt, color: t.textMuted }}
                   >
                     <ChevronLeft size={14} /> Previous
                   </button>
                   <button
-                    onClick={() => goToMcq(Math.min(activeMcqs.length - 1, mcqIndex + 1))}
-                    disabled={mcqIndex === activeMcqs.length - 1}
-                    className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-40"
-                    style={{ backgroundColor: t.teal, color: "#fff" }}
+                    onClick={() => setRevealed((prev) => ({ ...prev, [mcqIndex]: !prev[mcqIndex] }))}
+                    disabled={mcqSelected !== null}
+                    className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-extrabold disabled:opacity-40"
+                    style={{ backgroundColor: `${t.teal}1F`, color: t.teal, border: `1.5px solid ${t.teal}` }}
                   >
-                    Next <ChevronRight size={14} />
+                    <Eye size={14} /> {revealed[mcqIndex] && mcqSelected === null ? "Hide answer" : "Show answer"}
                   </button>
+                  {mcqIndex === activeMcqs.length - 1 ? (
+                    <button
+                      onClick={() => {
+                        clearPaperProgress(activePaper.id);
+                        setFinished(true);
+                      }}
+                      className="flex items-center justify-center gap-1 rounded-lg px-3 py-2.5 text-xs font-bold"
+                      style={{ backgroundColor: t.gold, color: "#241A08" }}
+                    >
+                      Finish <Flag size={14} />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => goToMcq(Math.min(activeMcqs.length - 1, mcqIndex + 1))}
+                      className="flex items-center justify-center gap-1 rounded-lg px-3 py-2.5 text-xs font-bold"
+                      style={{ backgroundColor: t.teal, color: "#fff" }}
+                    >
+                      Next <ChevronRight size={14} />
+                    </button>
+                  )}
                 </div>
               </div>
             ) : previewUrl ? (

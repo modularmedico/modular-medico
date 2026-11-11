@@ -1,11 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
   ArrowRight,
-  Bookmark,
-  BookmarkCheck,
   Clock,
   Check,
   X,
@@ -20,16 +18,20 @@ import {
   Brain,
   Microscope,
   ChevronDown,
+  Eye,
   X as CloseIcon,
 } from "lucide-react";
 import Card from "../components/Card";
 import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import Spinner from "../components/Spinner";
+import SaveMcqButton from "../components/SaveMcqButton";
+import { useSavedMcqs } from "../hooks/useSavedMcqs";
+import { mcqKey } from "../utils/mcqKey";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
 import { useAppStore } from "../store/useAppStore";
 import { SUBJECT_META } from "../data/subjects";
-import { addBookmark, recordQuizAttempt } from "../services/firestore";
+import { recordQuizAttempt } from "../services/firestore";
 import { finishTestAttempt } from "../services/testLeaderboard";
 import type { AnswerRecord } from "../types";
 
@@ -53,8 +55,12 @@ export default function Practice() {
   const setLastResult = useAppStore((s) => s.setLastResult);
   const t = isDark ? THEME.dark : THEME.light;
 
-  const [selected, setSelected] = useState<number | null>(null);
-  const [answered, setAnswered] = useState(false);
+  // Start from whatever this question already has in the session, so a resumed session (page
+  // reload, or "Continue from last time") shows the earlier pick instead of a blank question.
+  const initialRecord = session ? session.record[session.queue[session.pos]] : undefined;
+  const initialShowsFeedback = !!session && session.config.mode === "traditional" && !session.config.deferResults;
+  const [selected, setSelected] = useState<number | null>(initialRecord?.selected ?? null);
+  const [answered, setAnswered] = useState(initialShowsFeedback && !!initialRecord && initialRecord.selected !== null);
   const [aiMenuOpen, setAiMenuOpen] = useState(false);
   const [aiMode, setAiMode] = useState<AiMode | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -62,6 +68,8 @@ export default function Practice() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(() => {
     if (!session) return null;
+    // Resumed session: carry on from the time that was left when the learner exited.
+    if (typeof session.secondsLeft === "number") return session.secondsLeft;
     if (session.config.customTimerSeconds) return session.config.customTimerSeconds;
     if (session.config.mode === "exam") return session.queue.length * 60;
     if (session.config.timing === "timed") return 300;
@@ -76,6 +84,22 @@ export default function Practice() {
   // split-screen OMR/exam layout and continue the SAME session in the normal
   // one-question-at-a-time style instead of being hard-blocked.
   const [mobileNormalMode, setMobileNormalMode] = useState(false);
+  const saved = useSavedMcqs();
+
+  // Keep the remaining time in the persisted session (every few seconds and when leaving) so
+  // "Continue from last time" resumes the clock where it stopped. The clock is paused while away.
+  const secondsRef = useRef<number | null>(secondsLeft);
+  secondsRef.current = secondsLeft;
+  useEffect(() => {
+    const save = () => useAppStore.getState().updateSession({ secondsLeft: secondsRef.current });
+    const id = setInterval(save, 5000);
+    window.addEventListener("pagehide", save);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("pagehide", save);
+      save();
+    };
+  }, []);
 
   const addTimeSeconds = (sec: number) => {
     setSecondsLeft((curr) => (curr === null ? sec : curr + sec));
@@ -100,13 +124,17 @@ export default function Practice() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secondsLeft, finishing, isTimerPaused]);
 
+  // "Show answer" reveals the correct option + explanation without answering the question.
+  const revealedHere = !!session && !answered && !!session.revealed?.[session.queue[session.pos]];
+  const done = answered || revealedHere;
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (["1", "2", "3", "4"].includes(e.key)) selectOption(Number(e.key) - 1);
-      if (e.key === "Enter") (answered ? advance : submitAnswer)();
-      if ((e.key === "s" || e.key === "S") && !answered) skipQuestion();
+      if (e.key === "Enter") (done ? advance : submitAnswer)();
+      if ((e.key === "s" || e.key === "S") && !done) skipQuestion();
       if (e.key === "ArrowLeft") goBack();
-      if (e.key === "ArrowRight" && (answered || isOmr)) goForward();
+      if (e.key === "ArrowRight" && (done || isOmr)) goForward();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -124,11 +152,22 @@ export default function Practice() {
     );
   }
 
-  const { setRef, config, queue, pos, record, bookmarked, requeueCount, skipped } = session;
+  const { setRef, config, queue, pos, record, requeueCount, skipped } = session;
+  const revealed = session.revealed ?? {};
   const isOmr = (config.mode === "omr" || config.mode === "exam") && !mobileNormalMode;
   // Test Sessions with "show answers at the end": record the answer, never reveal it mid-test.
   const hideFeedback = !!config.deferResults;
-  const exitTo = setRef.moduleId.startsWith("test-") ? "/tests" : "/subjects";
+  const isTestSet = setRef.moduleId.startsWith("test-");
+  const isMockSet = setRef.moduleId.startsWith("mock-");
+  // Timed tests are leaderboard-tracked attempts, so leaving one discards it. Everything else
+  // (MCQ bank, custom quizzes, mock tests) is kept so "Continue from last time" can pick it up.
+  const exitTo = isTestSet ? "/tests" : isMockSet ? `/mock-tests/${setRef.block}` : "/subjects";
+  const exitPractice = () => {
+    if (isTestSet) clearSession();
+    else updateSession({ secondsLeft: secondsLeft });
+    navigate(exitTo);
+  };
+  const saveCtx = { subjectId: setRef.subjectId, moduleName: setRef.moduleName, block: setRef.block };
   const qIndex = queue[pos];
   const question = setRef.questions[qIndex];
   const totalSteps = queue.length;
@@ -140,11 +179,11 @@ export default function Practice() {
     .filter(({ qIdx }) => skipped[qIdx]);
 
   const selectOption = (i: number) => {
-    if (!answered) setSelected(i);
+    if (!done) setSelected(i);
   };
 
   const submitAnswer = () => {
-    if (selected === null || answered || finishing) return;
+    if (selected === null || done || finishing) return;
     const correct = selected === question.correct;
     const newRecord = { ...record, [qIndex]: { selected, correct } };
     // Answering a previously-skipped question clears its skipped flag.
@@ -256,15 +295,21 @@ export default function Practice() {
     navigate("/results");
   };
 
-  const toggleBookmark = () => {
-    if (!uid) return;
-    if (bookmarked[qIndex]) {
-      updateSession({ bookmarked: { ...bookmarked, [qIndex]: false } });
-    } else {
-      updateSession({ bookmarked: { ...bookmarked, [qIndex]: true } });
-      addBookmark(uid, setRef.subjectId, setRef.moduleName, setRef.block, question).catch(() => {});
-    }
+  // Reveal the answer + explanation of a question without answering it (it stays unanswered).
+  const showAnswer = (idx: number = qIndex) => {
+    if (finishing) return;
+    updateSession({ revealed: { ...revealed, [idx]: !revealed[idx] } });
   };
+
+  const saveBtn = (idx: number, full = false) => (
+    <SaveMcqButton
+      t={t}
+      full={full}
+      saved={saved.isSaved(setRef.questions[idx])}
+      busy={saved.busyKey === mcqKey(setRef.questions[idx])}
+      onClick={() => saved.toggle(setRef.questions[idx], saveCtx)}
+    />
+  );
 
   // Fetches an AI-generated explanation from our own /api/ai-explain endpoint, which
   // proxies the request to OpenRouter (server-side key) and tries several free models.
@@ -393,8 +438,8 @@ export default function Practice() {
             <Btn t={t} full onClick={() => setMobileNormalMode(true)}>
               Continue in Standard Mode
             </Btn>
-            <Btn t={t} full variant="ghost" onClick={() => { clearSession(); navigate(exitTo); }}>
-              Exit Practice
+            <Btn t={t} full variant="ghost" onClick={exitPractice}>
+              {isTestSet ? "Exit Practice" : "Save & exit"}
             </Btn>
           </div>
         </div>
@@ -404,37 +449,36 @@ export default function Practice() {
           {/* Left Side: MCQs */}
           <div className="flex-1 overflow-y-auto pr-4 pb-10">
             <div className="flex items-center justify-between mb-6 sticky top-0 z-10 py-3" style={{ backgroundColor: `${t.bg}F2`, backdropFilter: "blur(8px)" }}>
-               <button onClick={() => { clearSession(); navigate(exitTo); }} className="flex items-center gap-1 text-sm font-bold" style={{ color: t.textMuted }}>
-                 <ChevronLeft size={15} /> Exit
+               <button onClick={exitPractice} className="flex items-center gap-1 text-sm font-bold" style={{ color: t.textMuted }}>
+                 <ChevronLeft size={15} /> {isTestSet ? "Exit" : "Save & exit"}
                </button>
                <span style={{ fontFamily: FONT_MONO, fontSize: 12, color: t.textFaint }}>
-                 {config.mode === "exam" ? "MOCK EXAM" : "OMR MODE"} &middot; {totalSteps} QUESTIONS
+                 {config.mode === "exam" ? (isMockSet ? "MOCK TEST" : "MOCK EXAM") : "OMR MODE"} &middot; {totalSteps} QUESTIONS
                </span>
             </div>
+
+            {saved.needsLogin && (
+              <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm" style={{ backgroundColor: `${t.gold}20`, border: `1.5px solid ${t.gold}` }}>
+                <span>Log in to save MCQs and find them later on the Saved page.</span>
+                <div className="flex shrink-0 items-center gap-3">
+                  <button onClick={saved.goLogin} className="font-bold" style={{ color: t.teal }}>Log in</button>
+                  <button onClick={saved.dismissLogin} aria-label="Dismiss" style={{ color: t.textFaint }}><CloseIcon size={15} /></button>
+                </div>
+              </div>
+            )}
+            {saved.error && (
+              <div className="mb-6 rounded-2xl px-4 py-3 text-sm" style={{ backgroundColor: `${t.red}18`, color: t.red }}>{saved.error}</div>
+            )}
 
             {queue.map((qIdx, index) => {
               const q = setRef.questions[qIdx];
               const selectedOption = record[qIdx]?.selected ?? null;
-              const isBookmarked = bookmarked[qIdx];
+              const isRevealed = !!revealed[qIdx] && config.mode === "omr" && !hideFeedback;
               return (
                 <div key={qIdx} className="mb-12">
                   <div className="flex gap-3 mb-5">
                     <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 18, color: t.purple }}>{index + 1}.</span>
                     <h3 style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 18, lineHeight: 1.5, flex: 1 }}>{q.q}</h3>
-                    <button 
-                      onClick={() => {
-                        if (!uid) return;
-                        updateSession({ bookmarked: { ...bookmarked, [qIdx]: !isBookmarked } });
-                        if (!isBookmarked) {
-                          addBookmark(uid, setRef.subjectId, setRef.moduleName, setRef.block, q).catch(() => {});
-                        }
-                      }} 
-                      disabled={!uid} 
-                      title={uid ? "Bookmark" : "Log in to bookmark"}
-                      className="shrink-0 mt-1"
-                    >
-                      {isBookmarked ? <BookmarkCheck size={18} color={t.gold} /> : <Bookmark size={18} color={t.textFaint} />}
-                    </button>
                   </div>
                   <div className="flex flex-col gap-1.5 pl-7">
                     {q.options.map((opt, i) => (
@@ -451,8 +495,31 @@ export default function Practice() {
                           {String.fromCharCode(65 + i)}.
                         </span>
                         <span style={{ color: selectedOption === i ? t.text : t.textMuted }}>{opt}</span>
+                        {isRevealed && i === q.correct && (
+                          <span className="ml-auto shrink-0 text-xs font-bold" style={{ color: t.green }}>
+                            <Check size={14} className="mr-0.5 inline" />
+                            Correct answer
+                          </span>
+                        )}
                       </div>
                     ))}
+                  </div>
+                  {isRevealed && q.explanation && (
+                    <div className="ml-7 mt-2 rounded-xl p-3 text-xs" style={{ backgroundColor: t.surfaceAlt, color: t.textMuted, lineHeight: 1.6 }}>
+                      {q.explanation}
+                    </div>
+                  )}
+                  <div className="ml-7 mt-3 flex flex-wrap items-center gap-2">
+                    {config.mode === "omr" && !hideFeedback && (
+                      <button
+                        onClick={() => showAnswer(qIdx)}
+                        className="inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-2.5 text-sm font-extrabold"
+                        style={{ backgroundColor: `${t.teal}1F`, color: t.teal, border: `1.5px solid ${t.teal}` }}
+                      >
+                        <Eye size={16} /> {isRevealed ? "Hide answer" : "Show answer"}
+                      </button>
+                    )}
+                    {saveBtn(qIdx)}
                   </div>
                 </div>
               );
@@ -555,8 +622,8 @@ export default function Practice() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
       <div className="flex items-center justify-between">
-        <button onClick={() => { clearSession(); navigate(exitTo); }} className="flex items-center gap-1 text-sm font-bold" style={{ color: t.textMuted }}>
-          <ChevronLeft size={15} /> Exit
+        <button onClick={exitPractice} className="flex items-center gap-1 text-sm font-bold" style={{ color: t.textMuted }}>
+          <ChevronLeft size={15} /> {isTestSet ? "Exit" : "Save & exit"}
         </button>
         <span style={{ fontFamily: FONT_MONO, fontSize: 12, color: t.textFaint }}>
           {pos + 1} / {totalSteps}
@@ -572,9 +639,6 @@ export default function Practice() {
             </div>
           )}
           {!mm && ExitAndFinishBar}
-          <button onClick={toggleBookmark} disabled={!uid} title={uid ? "Bookmark" : "Log in to bookmark"}>
-            {bookmarked[qIndex] ? <BookmarkCheck size={18} color={t.gold} /> : <Bookmark size={18} color={t.textFaint} />}
-          </button>
         </div>
       </div>
 
@@ -626,7 +690,7 @@ export default function Practice() {
       <Card t={t} style={{ padding: 24, position: "relative" }}>
         {/* AI help is held back while a test is running (it would give away the answer);
             it opens up per question on the results screen instead. */}
-        {!setRef.moduleId.startsWith("test-") && (
+        {!isTestSet && !isMockSet && (
         <div className="mb-3 flex justify-end">
           <div className="relative">
             <button
@@ -666,11 +730,11 @@ export default function Practice() {
             const isCorrect = i === question.correct;
             let borderColor = t.border;
             let bg = "transparent";
-            if (answered) {
+            if (done) {
               if (isCorrect) {
                 borderColor = t.green;
                 bg = `${t.green}18`;
-              } else if (isSelected) {
+              } else if (isSelected && answered) {
                 borderColor = t.red;
                 bg = `${t.red}18`;
               }
@@ -682,20 +746,20 @@ export default function Practice() {
               <button
                 key={i}
                 onClick={() => selectOption(i)}
-                disabled={answered}
+                disabled={done}
                 className="flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm"
                 style={{ border: `1.5px solid ${borderColor}`, backgroundColor: bg, color: t.text }}
               >
                 <span
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold"
                   style={{
-                    border: `1.5px solid ${answered && isCorrect ? t.green : isSelected ? t.purple : t.textFaint}`,
-                    backgroundColor: answered && isCorrect ? t.green : isSelected && !answered ? t.purple : "transparent",
-                    color: (answered && isCorrect) || (isSelected && !answered) ? "#fff" : t.textFaint,
+                    border: `1.5px solid ${done && isCorrect ? t.green : isSelected ? t.purple : t.textFaint}`,
+                    backgroundColor: done && isCorrect ? t.green : isSelected && !done ? t.purple : "transparent",
+                    color: (done && isCorrect) || (isSelected && !done) ? "#fff" : t.textFaint,
                     fontFamily: FONT_MONO,
                   }}
                 >
-                  {answered ? (isCorrect ? <Check size={13} /> : isSelected ? <X size={13} /> : String.fromCharCode(65 + i)) : String.fromCharCode(65 + i)}
+                  {done ? (isCorrect ? <Check size={13} /> : isSelected && answered ? <X size={13} /> : String.fromCharCode(65 + i)) : String.fromCharCode(65 + i)}
                 </span>
                 {opt}
               </button>
@@ -703,11 +767,19 @@ export default function Practice() {
           })}
         </div>
 
-        {answered && (
+        {done && (
           <div className="mt-5 rounded-2xl p-4" style={{ backgroundColor: t.surfaceAlt, border: `1.5px solid ${t.border}` }}>
             <div className="mb-1.5 flex items-center gap-2">
-              {selected === question.correct ? <CheckCircle2 size={15} color={t.green} /> : <XCircle size={15} color={t.red} />}
-              <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 13 }}>{selected === question.correct ? "Correct" : "Not quite"}</span>
+              {answered ? (
+                selected === question.correct ? <CheckCircle2 size={15} color={t.green} /> : <XCircle size={15} color={t.red} />
+              ) : (
+                <Eye size={15} color={t.teal} />
+              )}
+              <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 13 }}>
+                {answered
+                  ? selected === question.correct ? "Correct" : "Not quite"
+                  : `Answer: ${String.fromCharCode(65 + question.correct)}. ${question.options[question.correct]}`}
+              </span>
             </div>
             <p style={{ color: t.textMuted, fontSize: 13.5, lineHeight: 1.6 }}>{question.explanation}</p>
           </div>
@@ -765,6 +837,34 @@ export default function Practice() {
         </div>
       )}
 
+      {/* Show answer + Save MCQ sit right above Previous / Next so they are always in reach */}
+      <div className={`grid gap-2 ${hideFeedback ? "grid-cols-1" : "grid-cols-2"}`}>
+        {!hideFeedback && !answered && (
+          <button
+            onClick={() => showAnswer()}
+            disabled={finishing}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-extrabold transition-transform active:scale-[0.97]"
+            style={{ backgroundColor: `${t.teal}1F`, color: t.teal, border: `1.5px solid ${t.teal}` }}
+          >
+            <Eye size={17} /> {revealedHere ? "Hide answer" : "Show answer"}
+          </button>
+        )}
+        {!hideFeedback && answered && <div />}
+        {saveBtn(qIndex, true)}
+      </div>
+      {saved.needsLogin && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm" style={{ backgroundColor: `${t.gold}20`, border: `1.5px solid ${t.gold}` }}>
+          <span>Log in to save MCQs and find them later on the Saved page.</span>
+          <div className="flex shrink-0 items-center gap-3">
+            <button onClick={saved.goLogin} className="font-bold" style={{ color: t.teal }}>Log in</button>
+            <button onClick={saved.dismissLogin} aria-label="Dismiss" style={{ color: t.textFaint }}><CloseIcon size={15} /></button>
+          </div>
+        </div>
+      )}
+      {saved.error && (
+        <div className="rounded-2xl px-4 py-3 text-sm" style={{ backgroundColor: `${t.red}18`, color: t.red }}>{saved.error}</div>
+      )}
+
       <div className="flex items-center justify-between gap-3">
         <button
           onClick={goBack}
@@ -777,7 +877,7 @@ export default function Practice() {
         </button>
 
         <div className="flex items-center gap-3">
-          {!answered && (
+          {!done && (
             <button
               onClick={skipQuestion}
               disabled={finishing}
@@ -788,7 +888,7 @@ export default function Practice() {
               <SkipForward size={14} /> Skip
             </button>
           )}
-          {answered && pos + 1 < totalSteps && (
+          {done && pos + 1 < totalSteps && (
             <button
               onClick={goForward}
               disabled={finishing}
@@ -799,7 +899,7 @@ export default function Practice() {
               Next <ChevronRight size={16} />
             </button>
           )}
-          {!answered ? (
+          {!done ? (
             <Btn t={t} onClick={submitAnswer} disabled={selected === null} icon={hideFeedback ? ArrowRight : undefined}>
               {hideFeedback ? (pos + 1 >= totalSteps ? "Finish test" : "Save & next") : "Submit answer"}
             </Btn>
