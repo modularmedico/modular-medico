@@ -866,16 +866,6 @@ export default function Practice() {
         {!hideFeedback && answered && <div />}
         {saveBtn(qIndex, true)}
       </div>
-      <button
-        type="button"
-        onClick={() => setShowEndConfirm(true)}
-        disabled={finishing}
-        title="End now and see your results"
-        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-extrabold transition-transform active:scale-[0.97] disabled:opacity-40"
-        style={{ backgroundColor: `${t.red}14`, color: t.red, border: `1.5px solid ${t.red}66` }}
-      >
-        <FlagOff size={17} /> End test
-      </button>
       {saved.needsLogin && (
         <div className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm" style={{ backgroundColor: `${t.gold}20`, border: `1.5px solid ${t.gold}` }}>
           <span>Log in to save MCQs and find them later on the Saved page.</span>
@@ -934,6 +924,16 @@ export default function Practice() {
           )}
         </div>
       </div>
+      <button
+        type="button"
+        onClick={() => setShowEndConfirm(true)}
+        disabled={finishing}
+        title="End now and see your results"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-extrabold transition-transform active:scale-[0.97] disabled:opacity-40"
+        style={{ backgroundColor: `${t.red}14`, color: t.red, border: `1.5px solid ${t.red}66` }}
+      >
+        <FlagOff size={17} /> End test
+      </button>
       <p className="hidden text-center text-xs md:block" style={{ color: t.textFaint }}>
         Keyboard: 1\u20134 to select \u00b7 Enter to submit / continue \u00b7 S for next \u00b7 \u2190 back \u00b7 \u2192 next
       </p>
