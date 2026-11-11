@@ -1,5 +1,4 @@
-import { httpsCallable } from "firebase/functions";
-import { functions } from "../firebase";
+import { getFirebaseFunctions } from "../firebase";
 import type { PaymentProvider } from "../types";
 
 export interface CheckoutFormResponse {
@@ -23,6 +22,8 @@ const PLAN_AMOUNTS_PKR: Record<"monthly" | "yearly", number> = {
  */
 export async function startCheckout(provider: PaymentProvider, plan: "monthly" | "yearly", uid: string) {
   const callableName = provider === "jazzcash" ? "createJazzCashCheckout" : "createEasypaisaCheckout";
+  const { httpsCallable } = await import("firebase/functions");
+  const functions = await getFirebaseFunctions();
   const call = httpsCallable<{ uid: string; plan: string; amount: number }, CheckoutFormResponse>(functions, callableName);
   const result = await call({ uid, plan, amount: PLAN_AMOUNTS_PKR[plan] });
   redirectToGateway(result.data);

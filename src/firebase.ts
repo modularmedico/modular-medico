@@ -6,7 +6,6 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
 } from "firebase/firestore";
-import { getFunctions } from "firebase/functions";
 import appletConfig from "../firebase-applet-config.json";
 
 // Your web app's Firebase configuration.
@@ -48,7 +47,12 @@ try {
 } catch {
   db = getFirestore(app);
 }
-export const functions = getFunctions(app);
+// Cloud Functions are only needed at checkout, so the SDK is loaded on demand (keeps it out of the
+// startup bundle).
+export async function getFirebaseFunctions() {
+  const { getFunctions } = await import("firebase/functions");
+  return getFunctions(app);
+}
 
 // Analytics only works in a real browser (not SSR / not this build step), and some
 // ad-blockers or privacy modes will throw when it tries to initialize — so it's

@@ -61,10 +61,19 @@ export default function App() {
   const uid = useAppStore((s) => s.uid);
 
   useEffect(() => {
-    initAnalytics();
-    // Records one visit for this browser session (see services/siteStats.ts).
-    // Best-effort and silent — never blocks or affects the rest of the app.
-    trackVisit();
+    // Analytics + visit counting are best-effort, so they wait until the browser is idle and
+    // never compete with the first screen for network or CPU (see services/siteStats.ts).
+    const run = () => {
+      initAnalytics();
+      trackVisit();
+    };
+    const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(run, { timeout: 4000 });
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(run, 2000);
+    return () => window.clearTimeout(id);
   }, []);
 
   // Keep which Blocks are free live for the lifetime of the app, so an

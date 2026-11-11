@@ -26,6 +26,7 @@ import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import Spinner from "../components/Spinner";
 import SaveMcqButton from "../components/SaveMcqButton";
+import EndTestModal from "../components/EndTestModal";
 import { useSavedMcqs } from "../hooks/useSavedMcqs";
 import { mcqKey } from "../utils/mcqKey";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
@@ -80,6 +81,7 @@ export default function Practice() {
   const [showAddTime, setShowAddTime] = useState(false);
   const [customMinutes, setCustomMinutes] = useState("");
   const [showSkippedList, setShowSkippedList] = useState(false);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
   // Mobile fallback: lets a phone/small-tablet user opt out of the desktop-only
   // split-screen OMR/exam layout and continue the SAME session in the normal
   // one-question-at-a-time style instead of being hard-blocked.
@@ -130,6 +132,10 @@ export default function Practice() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (showEndConfirm) {
+        if (e.key === "Escape") setShowEndConfirm(false);
+        return;
+      }
       if (["1", "2", "3", "4"].includes(e.key)) selectOption(Number(e.key) - 1);
       if (e.key === "Enter") (done ? advance : submitAnswer)();
       if ((e.key === "s" || e.key === "S") && !done) skipQuestion();
@@ -355,12 +361,19 @@ export default function Practice() {
   const mm = secondsLeft !== null ? String(Math.floor(secondsLeft / 60)).padStart(2, "0") : null;
   const ss = secondsLeft !== null ? String(secondsLeft % 60).padStart(2, "0") : null;
 
-  const ExitAndFinishBar = (
-    <div className="flex items-center gap-3">
-      <button onClick={() => finishNow()} title="End practice now and see results" className="flex items-center gap-1 text-xs font-bold" style={{ color: t.textFaint }}>
-        <FlagOff size={13} /> End now
-      </button>
-    </div>
+  const answeredCount = Object.values(record).filter((r) => r && r.selected !== null).length;
+  const endTestModal = (
+    <EndTestModal
+      t={t}
+      open={showEndConfirm}
+      answered={answeredCount}
+      total={totalSteps}
+      onCancel={() => setShowEndConfirm(false)}
+      onConfirm={() => {
+        setShowEndConfirm(false);
+        finishNow();
+      }}
+    />
   );
 
   // Lets the learner add an arbitrary number of minutes to the clock, in addition to
@@ -427,6 +440,7 @@ export default function Practice() {
   if (isOmr) {
     return (
       <>
+        {endTestModal}
         {/* Mobile/Tablet warning */}
         <div className="md:hidden flex flex-col items-center justify-center py-20 text-center">
           <Monitor size={48} color={t.purple} className="mb-4" />
@@ -609,8 +623,8 @@ export default function Practice() {
                   <SkipForward size={13} /> Review {skippedPositions.length} skipped
                 </button>
               )}
-              <Btn t={t} full onClick={() => finishNow()} disabled={finishing}>
-                Submit Exam
+              <Btn t={t} full onClick={() => setShowEndConfirm(true)} disabled={finishing}>
+                End test &amp; submit
               </Btn>
             </div>
           </div>
@@ -621,6 +635,7 @@ export default function Practice() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
+      {endTestModal}
       <div className="flex items-center justify-between">
         <button onClick={exitPractice} className="flex items-center gap-1 text-sm font-bold" style={{ color: t.textMuted }}>
           <ChevronLeft size={15} /> {isTestSet ? "Exit" : "Save & exit"}
@@ -638,7 +653,6 @@ export default function Practice() {
               {config.mode !== "exam" && AddTimeControl}
             </div>
           )}
-          {!mm && ExitAndFinishBar}
         </div>
       </div>
 
@@ -852,6 +866,16 @@ export default function Practice() {
         {!hideFeedback && answered && <div />}
         {saveBtn(qIndex, true)}
       </div>
+      <button
+        type="button"
+        onClick={() => setShowEndConfirm(true)}
+        disabled={finishing}
+        title="End now and see your results"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-extrabold transition-transform active:scale-[0.97] disabled:opacity-40"
+        style={{ backgroundColor: `${t.red}14`, color: t.red, border: `1.5px solid ${t.red}66` }}
+      >
+        <FlagOff size={17} /> End test
+      </button>
       {saved.needsLogin && (
         <div className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm" style={{ backgroundColor: `${t.gold}20`, border: `1.5px solid ${t.gold}` }}>
           <span>Log in to save MCQs and find them later on the Saved page.</span>
@@ -883,9 +907,9 @@ export default function Practice() {
               disabled={finishing}
               className="flex items-center gap-1 text-sm font-bold"
               style={{ color: t.textFaint }}
-              title="Move on without answering this question"
+              title="Go to the next question without answering this one"
             >
-              <SkipForward size={14} /> Skip
+              Next <ChevronRight size={16} />
             </button>
           )}
           {done && pos + 1 < totalSteps && (
@@ -911,7 +935,7 @@ export default function Practice() {
         </div>
       </div>
       <p className="hidden text-center text-xs md:block" style={{ color: t.textFaint }}>
-        Keyboard: 1\u20134 to select \u00b7 Enter to submit / continue \u00b7 S to skip \u00b7 \u2190 back \u00b7 \u2192 next
+        Keyboard: 1\u20134 to select \u00b7 Enter to submit / continue \u00b7 S for next \u00b7 \u2190 back \u00b7 \u2192 next
       </p>
     </div>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ChevronLeft, FileStack, FolderTree, X, ExternalLink, ChevronRight, CheckCircle2, XCircle, Eye, Flag, RotateCcw, PartyPopper } from "lucide-react";
+import { ChevronLeft, FileStack, FolderTree, X, ExternalLink, ChevronRight, CheckCircle2, XCircle, Eye, Flag, FlagOff, RotateCcw, PartyPopper } from "lucide-react";
 import Spinner from "../components/Spinner";
 import AiExplain from "../components/AiExplain";
 import SaveMcqButton from "../components/SaveMcqButton";
@@ -8,6 +8,7 @@ import ReviewPrompt from "../components/ReviewPrompt";
 import ResumeModal from "../components/ResumeModal";
 import ContinueBanner from "../components/ContinueBanner";
 import Btn from "../components/Btn";
+import EndTestModal from "../components/EndTestModal";
 import { useSavedMcqs } from "../hooks/useSavedMcqs";
 import { mcqKey } from "../utils/mcqKey";
 import {
@@ -49,6 +50,7 @@ export default function PastPaperList() {
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [revealed, setRevealed] = useState<Record<number, boolean>>({});
   const [finished, setFinished] = useState(false);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
   // Waiting on the student's "continue or start over?" choice before opening a paper.
   const [resumePrompt, setResumePrompt] = useState<{ paper: FirestorePastPaper; prog: PaperProgress; same: boolean } | null>(null);
   const saved = useSavedMcqs();
@@ -59,6 +61,7 @@ export default function PastPaperList() {
     setAnswers(from?.answers ?? {});
     setRevealed(from?.revealed ?? {});
     setFinished(false);
+    setShowEndConfirm(false);
   };
 
   const closePaper = () => resetViewer(null);
@@ -481,6 +484,27 @@ export default function PastPaperList() {
                     </button>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowEndConfirm(true)}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-extrabold"
+                  style={{ backgroundColor: `${t.red}14`, color: t.red, border: `1.5px solid ${t.red}66` }}
+                >
+                  <FlagOff size={14} /> End test
+                </button>
+                <EndTestModal
+                  t={t}
+                  open={showEndConfirm}
+                  noun="paper"
+                  answered={Object.keys(answers).length}
+                  total={activeMcqs.length}
+                  onCancel={() => setShowEndConfirm(false)}
+                  onConfirm={() => {
+                    setShowEndConfirm(false);
+                    clearPaperProgress(activePaper.id);
+                    setFinished(true);
+                  }}
+                />
               </div>
             ) : previewUrl ? (
               <iframe src={previewUrl} title={activePaper.title} className="h-full w-full" allow="autoplay" />

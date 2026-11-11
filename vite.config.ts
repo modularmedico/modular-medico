@@ -26,9 +26,22 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
+        // Don't download admin/charts code in the background for every student. They are
+        // cached the first time they're actually opened (runtime rule below).
+        globIgnores: ['**/AdminPanel-*.js', '**/charts-*.js'],
         // Keep Google Fonts on the device after the first visit so text never waits on, or
         // reflows because of, a font download again.
         runtimeCaching: [
+          {
+            urlPattern: /\/assets\/.*\.woff2$/,
+            handler: 'CacheFirst',
+            options: { cacheName: 'self-hosted-fonts', expiration: { maxEntries: 12, maxAgeSeconds: 60 * 60 * 24 * 365 } },
+          },
+          {
+            urlPattern: /\/assets\/(AdminPanel|charts)-.*\.js$/,
+            handler: 'CacheFirst',
+            options: { cacheName: 'lazy-heavy-chunks', expiration: { maxEntries: 8 } },
+          },
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'StaleWhileRevalidate',
@@ -54,12 +67,12 @@ export default defineConfig({
         display: 'standalone',
         icons: [
           {
-            src: 'icon.png', // Fallback, no real icon yet
+            src: 'icon-192.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: 'icon.png',
+            src: 'icon-512.png',
             sizes: '512x512',
             type: 'image/png',
           }

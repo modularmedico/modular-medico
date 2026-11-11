@@ -1,6 +1,6 @@
-export const FONT_DISPLAY = "'Baloo 2', sans-serif";
-export const FONT_BODY = "'Plus Jakarta Sans', sans-serif";
-export const FONT_MONO = "'JetBrains Mono', monospace";
+export const FONT_DISPLAY = "'Baloo 2 Variable', 'Baloo 2', sans-serif";
+export const FONT_BODY = "'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', sans-serif";
+export const FONT_MONO = "'JetBrains Mono Variable', 'JetBrains Mono', monospace";
 
 export interface ThemeTokens {
   bg: string;
