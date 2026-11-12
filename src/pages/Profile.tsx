@@ -23,6 +23,8 @@ export default function Profile() {
   const displayName = useAppStore((s) => s.displayName);
   const profile = useAppStore((s) => s.profile);
   const isPremium = useIsPremium();
+  // Admin manually unlocked at least one block => treat as premium (hide upgrade card)
+  const hasManualUnlock = (profile?.unlockedBlocks?.length ?? 0) > 0;
   const t = isDark ? THEME.dark : THEME.light;
 
   const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
@@ -170,7 +172,7 @@ export default function Profile() {
           </button>
         </div>
 
-        {!isPremium && (
+        {!isPremium && !hasManualUnlock && (
           <Card t={t} style={{ borderColor: t.gold }} className="flex items-center justify-between gap-3">
             <div>
               <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14 }}>You're on the free plan</span>

@@ -119,6 +119,20 @@ export default function HubBrowse() {
   const goPaywall = () => navigate(isLoggedIn ? "/paywall" : "/signup");
 
   const [yearFilter, setYearFilter] = useState("all");
+  // Test Sessions hub: only the Mock Tests + Test Sessions boxes show first; tapping
+  // Test Sessions reveals the Leaderboard + Block tiles. Remembered for this tab so
+  // coming back from a Block doesn't collapse it again.
+  const [sessionsOpen, setSessionsOpen] = useState(() => {
+    try { return sessionStorage.getItem("hub-tests-open") === "1"; } catch { return false; }
+  });
+  const toggleSessions = () =>
+    setSessionsOpen((o) => {
+      const next = !o;
+      try { sessionStorage.setItem("hub-tests-open", next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  const testsHub = kind === "tests" && level === 0;
+  const hideTestsBlocks = testsHub && !sessionsOpen;
   const [blockDefs, setBlockDefs] = useState(DEFAULT_BLOCK_DEFINITIONS);
   useEffect(() => subscribeBlockDefinitions(setBlockDefs), []);
 
@@ -458,6 +472,34 @@ export default function HubBrowse() {
         </Card>
       )}
 
+      {/* Test Sessions box — tap to reveal the Leaderboard + Block tiles */}
+      {testsHub && (
+        <Card
+          t={t}
+          onClick={toggleSessions}
+          className="flex items-center gap-4 p-4 transition-all hover:scale-[1.01]"
+          style={{ border: `1.5px solid ${accent}`, cursor: "pointer" }}
+        >
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: `${accent}22` }}>
+            <KindIcon size={24} color={accent} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 18 }}>Test Sessions</div>
+            <div style={{ color: t.textMuted, fontSize: 13, lineHeight: 1.4 }}>
+              Timed exam-style tests by Block. Tap to choose a Block and see the leaderboard.
+            </div>
+          </div>
+          <ChevronRight size={18} color={accent} style={{ transform: sessionsOpen ? "rotate(90deg)" : undefined, transition: "transform .2s" }} />
+        </Card>
+      )}
+
+      {/* Leaderboard (Test Sessions hub, once opened) */}
+      {testsHub && sessionsOpen && canAccessTests && (
+        <Btn t={t} full variant="ghost" icon={Trophy} onClick={() => navigate("/tests?tab=leaderboard")}>
+          Leaderboard
+        </Btn>
+      )}
+
       {/* Breadcrumb trail */}
       {level > 0 && (
         <div className="flex flex-wrap items-center gap-1 text-xs" style={{ color: t.textFaint }}>
@@ -477,6 +519,7 @@ export default function HubBrowse() {
       )}
 
       {/* Header */}
+      {!testsHub && (
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
           <div className="flex items-center gap-2">
@@ -529,16 +572,12 @@ export default function HubBrowse() {
               Practice all Subheadings
             </Btn>
           )}
-          {kind === "tests" && level === 0 && canAccessTests && (
-            <Btn t={t} full variant="ghost" icon={Trophy} onClick={() => navigate("/tests?tab=leaderboard")}>
-              Leaderboard
-            </Btn>
-          )}
         </div>
       </div>
+      )}
 
       {/* Year filter — blocks page only */}
-      {level === 0 && (
+      {level === 0 && kind !== "tests" && (
         <div className="flex flex-wrap items-center gap-2">
           {YEARS.map((y) => (
             <Pill key={y.id} t={t} active={yearFilter === y.id} onClick={() => setYearFilter(y.id)}>
@@ -548,7 +587,7 @@ export default function HubBrowse() {
         </div>
       )}
 
-      {kind === "tests" && !canAccessTests && (
+      {kind === "tests" && !canAccessTests && !hideTestsBlocks && (
         <Card t={t} style={{ textAlign: "center", padding: 32 }}>
           <Lock size={28} color={t.textFaint} style={{ margin: "0 auto 10px" }} />
           <p style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 16 }}>Test Series is locked</p>
@@ -578,7 +617,7 @@ export default function HubBrowse() {
         </p>
       )}
 
-      {!(kind === "tests" && !canAccessTests) && !loaded && !loadError && (
+      {!(kind === "tests" && !canAccessTests) && !hideTestsBlocks && !loaded && !loadError && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label={`Loading ${levelNames[level].toLowerCase()}`}>
           {Array.from({ length: 6 }).map((_, i) => (
             <div
@@ -610,7 +649,7 @@ export default function HubBrowse() {
       )}
 
       {/* LEVEL 0 — block tiles */}
-      {loaded && level === 0 && !(kind === "tests" && !canAccessTests) && (
+      {loaded && level === 0 && !hideTestsBlocks && !(kind === "tests" && !canAccessTests) && (
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-8">
           {rows.map((r) => (
             <button
