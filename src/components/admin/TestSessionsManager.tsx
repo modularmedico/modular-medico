@@ -4,6 +4,7 @@ import Card from "../Card";
 import Pill from "../Pill";
 import Btn from "../Btn";
 import Toggle from "../Toggle";
+import IndependentMcqAdder from "./IndependentMcqAdder";
 import { FONT_DISPLAY, FONT_MONO, type ThemeTokens } from "../../theme";
 import { MASTER_MODULES, SUBJECT_LIST, SUBJECT_META, TOTAL_BLOCKS } from "../../data/subjects";
 import { subscribeScopedQuestions } from "../../services/adminContent";
@@ -254,9 +255,14 @@ export function TestEditor({
   onAdd = addQuestionsToTestSession,
   onRemove = removeQuestionFromTestSession,
   noun = "test",
+  allowIndependent = false,
+  defaultBlock = 0,
 }: {
   t: ThemeTokens;
   test: TestSessionDoc;
+  /** Show the "Write new MCQs" mode (bracket paste / traditional form) next to the question-bank picker. */
+  allowIndependent?: boolean;
+  defaultBlock?: number;
   onNotice: (n: { tone: "ok" | "err"; text: string } | null) => void;
   onAdd?: (test: TestSessionDoc, added: TestSessionQuestion[], source: TestSessionSource) => Promise<void>;
   onRemove?: (test: TestSessionDoc, sourceId: string) => Promise<void>;
@@ -284,6 +290,7 @@ export function TestEditor({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [showList, setShowList] = useState(false);
+  const [addMode, setAddMode] = useState<"bank" | "new">("bank");
 
   const moduleName = MASTER_MODULES.find((m) => m.id === moduleId)?.name || "";
   const scopeReady = !!block && !!moduleId && !!subjectId;
@@ -424,6 +431,39 @@ export function TestEditor({
 
   return (
     <div className="flex flex-col gap-5 border-t pt-4" style={{ borderColor: t.border }}>
+      {allowIndependent && (
+        <div className="flex gap-2">
+          {([
+            ["bank", "From question bank"],
+            ["new", "Write new MCQs"],
+          ] as const).map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setAddMode(k)}
+              className="rounded-xl px-3 py-2 text-xs font-bold"
+              style={{
+                backgroundColor: addMode === k ? t.teal : t.surfaceAlt,
+                color: addMode === k ? "#fff" : t.text,
+                border: `1.5px solid ${addMode === k ? t.teal : t.border}`,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {allowIndependent && addMode === "new" ? (
+        <IndependentMcqAdder
+          t={t}
+          test={test}
+          defaultBlock={defaultBlock}
+          noun={noun}
+          onNotice={onNotice}
+          onAdd={onAdd}
+        />
+      ) : (
+        <>
       <div>
         <h3 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15 }}>Add MCQs from the question bank</h3>
         <p className="text-xs" style={{ color: t.textFaint, marginTop: 2 }}>
@@ -615,6 +655,8 @@ export function TestEditor({
           Add {selected.size > 0 ? selected.size : ""} MCQ{selected.size !== 1 ? "s" : ""} to {noun}
         </Btn>
       </div>
+        </>
+      )}
 
       {/* What's already in the test */}
       <div className="flex flex-col gap-3 border-t pt-4" style={{ borderColor: t.border }}>
@@ -655,8 +697,9 @@ export function TestEditor({
                   <span style={{ fontFamily: FONT_MONO, color: t.textFaint, fontSize: 12 }}>{i + 1}. </span>
                   {q.q}
                   <div className="mt-0.5 text-[11px]" style={{ color: t.textFaint }}>
-                    B{q.block} · {q.moduleName} · {subjectLabel(q.subjectId)}
-                    {q.topicName ? ` · ${q.topicName}` : ""}
+                    {[`B${q.block}`, q.moduleName, q.subjectId ? subjectLabel(q.subjectId) : "", q.topicName]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </div>
                 </div>
                 <button

@@ -281,6 +281,8 @@ export default function MockTestsManager({ t }: { t: ThemeTokens }) {
                   t={t}
                   test={m as TestSessionDoc}
                   noun="mock test"
+                  allowIndependent
+                  defaultBlock={m.block}
                   onNotice={setNotice}
                   onAdd={(test: TestSessionDoc, added: TestSessionQuestion[], source: TestSessionSource) =>
                     addQuestionsToMockTest(test as MockTestDoc, added, source)
