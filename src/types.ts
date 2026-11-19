@@ -244,6 +244,13 @@ export interface UserProfile {
    * Manually Unlocked Blocks). `false`/absent means no override.
    */
   pastPapersUnlocked?: boolean;
+  /**
+   * Per-account Mock Tests access override, set only by an admin from the
+   * "Manage Access" admin tab (the "Mock" toggle next to a student's Manually
+   * Unlocked Blocks). When true, this account can start every published mock
+   * test in every Block. `false`/absent means no override: normal Block rules apply.
+   */
+  mockTestsUnlocked?: boolean;
 }
 
 export interface AttemptRecord {

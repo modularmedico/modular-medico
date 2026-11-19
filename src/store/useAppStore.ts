@@ -251,5 +251,12 @@ export const useIsPaperBlockUnlocked = (block: number) =>
  * global switch is off; everyone else follows that single global on/off
  * switch an admin sets on the "Manage Access" tab.
  */
+/**
+ * Whether the signed-in user has the per-account Mock Tests override
+ * (`mockTestsUnlocked`, set from the "Manage Access" tab), which opens every
+ * published mock test in every Block regardless of Block access.
+ */
+export const useHasMockTestsUnlocked = () => useAppStore((s) => !!s.profile?.mockTestsUnlocked);
+
 export const useCanAccessTestSeries = () =>
   useAppStore((s) => s.isAdmin || !!s.profile?.testSeriesUnlocked || s.testSeriesEnabled);

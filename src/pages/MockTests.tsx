@@ -6,7 +6,7 @@ import Pill from "../components/Pill";
 import Btn from "../components/Btn";
 import ContinueBanner from "../components/ContinueBanner";
 import { THEME, FONT_DISPLAY, FONT_MONO } from "../theme";
-import { useAppStore, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
+import { useAppStore, useHasMockTestsUnlocked, useIsLoggedIn, useIsPremium } from "../store/useAppStore";
 import { DEFAULT_BLOCK_DEFINITIONS, TOTAL_BLOCKS } from "../data/subjects";
 import { subscribeBlockDefinitions } from "../services/adminContent";
 import { subscribePublishedMockTests } from "../services/mockTests";
@@ -18,7 +18,7 @@ import type { MockTestDoc, PracticeConfig } from "../types";
  *   /mock-tests          -> Blocks 1-15
  *   /mock-tests/:block   -> Mock Test 1, Mock Test 2, ... for that Block
  * A mock test runs in the strict exam layout (OMR sheet, 1 minute per MCQ, answers revealed only
- * on the results screen). Access follows the same Block rules as the MCQ bank.
+ * on the results screen). Access follows the same Block rules as the MCQ bank, plus the per-account `mockTestsUnlocked` override.
  */
 export default function MockTests() {
   const navigate = useNavigate();
@@ -29,6 +29,7 @@ export default function MockTests() {
   const isAdmin = useAppStore((s) => s.isAdmin);
   const isLoggedIn = useIsLoggedIn();
   const isPremium = useIsPremium();
+  const mockTestsUnlocked = useHasMockTestsUnlocked();
   const freeBlocks = useAppStore((s) => s.freeBlocks);
   const unlockedBlocks = useAppStore((s) => s.profile?.unlockedBlocks);
   const startSession = useAppStore((s) => s.startSession);
@@ -52,7 +53,7 @@ export default function MockTests() {
     []
   );
 
-  const isBlockOpen = (b: number) => freeBlocks.includes(b) || isAdmin || isPremium || !!unlockedBlocks?.includes(b);
+  const isBlockOpen = (b: number) => freeBlocks.includes(b) || isAdmin || isPremium || mockTestsUnlocked || !!unlockedBlocks?.includes(b);
   const goPaywall = () => navigate(isLoggedIn ? "/paywall" : "/signup");
 
   const countByBlock = useMemo(() => {

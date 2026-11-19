@@ -2177,6 +2177,11 @@ export async function setUserTestSeriesUnlocked(uid: string, unlocked: boolean) 
   await updateDoc(doc(db, "users", uid), { testSeriesUnlocked: unlocked });
 }
 
+/** Grants or revokes the per-account Mock Tests override — the "Mock" toggle in Manage Access. */
+export async function setUserMockTestsUnlocked(uid: string, unlocked: boolean) {
+  await updateDoc(doc(db, "users", uid), { mockTestsUnlocked: unlocked });
+}
+
 /** Grants or revokes the per-account Past Papers override — the "Past Papers" toggle in Manage Access. */
 export async function setUserPastPapersUnlocked(uid: string, unlocked: boolean) {
   await updateDoc(doc(db, "users", uid), { pastPapersUnlocked: unlocked });

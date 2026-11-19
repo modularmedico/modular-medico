@@ -78,6 +78,7 @@ import {
   setUserUnlockedBlocks,
   setUserTestSeriesUnlocked,
   setUserPastPapersUnlocked,
+  setUserMockTestsUnlocked,
   setUserPremium,
   subscribeFreeBlocks,
   saveFreeBlocks,
@@ -321,6 +322,24 @@ export default function AdminPanel() {
     } catch {
       setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, pastPapersUnlocked: u.pastPapersUnlocked } : x)));
       setAccessNotice(`Failed to update Past Papers access for ${u.email || u.uid}.`);
+      setTimeout(() => setAccessNotice(null), 3500);
+    } finally {
+      setAccessSaving((s) => ({ ...s, [u.uid]: false }));
+    }
+  };
+
+  // Grants/revokes the standalone "Mock" (Mock Tests) override for one account.
+  const handleToggleUserMockTests = async (u: UserProfile) => {
+    const next = !u.mockTestsUnlocked;
+    setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, mockTestsUnlocked: next } : x)));
+    setAccessSaving((s) => ({ ...s, [u.uid]: true }));
+    try {
+      await setUserMockTestsUnlocked(u.uid, next);
+      setAccessNotice(next ? `${u.email || u.uid} can now access Mock Tests.` : `${u.email || u.uid} no longer has Mock Tests access granted.`);
+      setTimeout(() => setAccessNotice(null), 2500);
+    } catch {
+      setAllUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, mockTestsUnlocked: u.mockTestsUnlocked } : x)));
+      setAccessNotice(`Failed to update Mock Tests access for ${u.email || u.uid}.`);
       setTimeout(() => setAccessNotice(null), 3500);
     } finally {
       setAccessSaving((s) => ({ ...s, [u.uid]: false }));
@@ -4485,6 +4504,21 @@ export default function AdminPanel() {
                           title={`Past Papers${u.pastPapersUnlocked ? " (unlocked for this account)" : ""}`}
                         >
                           <FileStack size={12} /> Past Papers
+                        </button>
+
+                        {/* Standalone Mock Tests override for this one account. */}
+                        <button
+                          onClick={() => handleToggleUserMockTests(u)}
+                          disabled={isSaving}
+                          className="flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-extrabold transition-all disabled:opacity-40"
+                          style={{
+                            backgroundColor: u.mockTestsUnlocked ? t.purpleStrong : t.surfaceAlt,
+                            color: u.mockTestsUnlocked ? "#fff" : t.textMuted,
+                            border: `1.5px solid ${u.mockTestsUnlocked ? t.purpleStrong : t.border}`,
+                          }}
+                          title={`Mock Tests${u.mockTestsUnlocked ? " (unlocked for this account)" : ""}`}
+                        >
+                          <ClipboardCheck size={12} /> Mock
                         </button>
                       </div>
                     </div>
