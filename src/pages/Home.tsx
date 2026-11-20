@@ -464,13 +464,8 @@ export default function Home() {
                 <p style={{ color: t.textMuted, fontSize: 14, lineHeight: 1.6 }}>
                   {r.text || "Loved practicing on Modular Medico!"}
                 </p>
-                <div className="mt-auto">
-                  <div className="text-sm font-bold" style={{ fontFamily: FONT_DISPLAY }}>
-                    {r.displayName}
-                  </div>
-                  {r.source === "admin" && r.context && (
-                    <div className="text-xs" style={{ color: t.textFaint }}>{r.context}</div>
-                  )}
+                <div className="mt-auto text-sm font-bold" style={{ fontFamily: FONT_DISPLAY }}>
+                  {r.displayName}
                 </div>
               </Card>
             ))}

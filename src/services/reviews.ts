@@ -51,37 +51,6 @@ export async function submitReview(input: {
   });
 }
 
-/**
- * Admin: add a review by hand (e.g. feedback received on WhatsApp). Stored with source "admin" and
- * the admin's uid. `context` is shown under the name on the homepage (e.g. "MBBS Year 2, KEMU").
- */
-export async function addAdminReview(input: {
-  adminUid: string;
-  displayName: string;
-  rating: number;
-  text: string;
-  context: string;
-  featured: boolean;
-}): Promise<void> {
-  const text = input.text.trim().slice(0, MAX_REVIEW_CHARS);
-  const displayName = input.displayName.trim().slice(0, 60);
-  if (!displayName) throw new Error("Enter the reviewer's name.");
-  if (!text) throw new Error("Enter the review text.");
-  if (input.rating < 1 || input.rating > 5) throw new Error("Pick a star rating first.");
-  const now = Date.now();
-  await addDoc(collection(db, COL), {
-    uid: input.adminUid,
-    displayName,
-    rating: Math.round(input.rating),
-    text,
-    source: "admin" as ReviewSource,
-    context: input.context.trim().slice(0, 160),
-    featured: input.featured,
-    featuredAt: input.featured ? now : null,
-    createdAt: now,
-  });
-}
-
 /** Admin: every review, newest first. */
 export function subscribeAllReviews(cb: (list: ReviewDoc[]) => void, onError?: (msg: string) => void) {
   return onSnapshot(

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Home, Loader2, MessageSquareHeart, Plus, Star, Trash2 } from "lucide-react";
+import { AlertTriangle, Home, Loader2, MessageSquareHeart, Star, Trash2 } from "lucide-react";
 import Card from "../Card";
 import Pill from "../Pill";
 import { FONT_DISPLAY, FONT_MONO, type ThemeTokens } from "../../theme";
-import { MAX_FEATURED, MAX_REVIEW_CHARS, addAdminReview, deleteReview, setReviewFeatured, subscribeAllReviews } from "../../services/reviews";
-import { getFirebaseAuth } from "../../firebase";
+import { MAX_FEATURED, deleteReview, setReviewFeatured, subscribeAllReviews } from "../../services/reviews";
 import type { ReviewDoc, ReviewSource } from "../../types";
 
 const SOURCE_LABEL: Record<ReviewSource, string> = {
@@ -12,7 +11,6 @@ const SOURCE_LABEL: Record<ReviewSource, string> = {
   past_paper: "Past Paper",
   test: "Test Session",
   mock: "Mock Test",
-  admin: "Added by admin",
 };
 
 /**
@@ -43,15 +41,6 @@ export default function ReviewsManager({ t }: { t: ThemeTokens }) {
     []
   );
 
-  // "Add a review" form (admin-written reviews, e.g. feedback received over WhatsApp)
-  const [showForm, setShowForm] = useState(false);
-  const [fName, setFName] = useState("");
-  const [fContext, setFContext] = useState("");
-  const [fRating, setFRating] = useState(5);
-  const [fText, setFText] = useState("");
-  const [fFeatured, setFFeatured] = useState(true);
-  const [saving, setSaving] = useState(false);
-
   const featuredCount = reviews.filter((r) => r.featured).length;
   const shown = useMemo(() => (filter === "featured" ? reviews.filter((r) => r.featured) : reviews), [reviews, filter]);
   const avg = reviews.length ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length : 0;
@@ -69,34 +58,6 @@ export default function ReviewsManager({ t }: { t: ThemeTokens }) {
       setNotice({ tone: "err", text: e instanceof Error ? e.message : "Couldn't update that review." });
     } finally {
       setBusyId(null);
-    }
-  };
-
-  const submitNew = async () => {
-    const adminUid = getFirebaseAuth().currentUser?.uid;
-    if (!adminUid) {
-      setNotice({ tone: "err", text: "You need to be signed in as admin to add a review." });
-      return;
-    }
-    const wantFeatured = fFeatured && featuredCount < MAX_FEATURED;
-    setSaving(true);
-    try {
-      await addAdminReview({ adminUid, displayName: fName, rating: fRating, text: fText, context: fContext, featured: wantFeatured });
-      setNotice(
-        fFeatured && !wantFeatured
-          ? { tone: "err", text: `Review saved, but the homepage already has ${MAX_FEATURED} reviews. Remove one, then tick "Show on homepage" on this one.` }
-          : null
-      );
-      setFName("");
-      setFContext("");
-      setFText("");
-      setFRating(5);
-      setFFeatured(true);
-      setShowForm(false);
-    } catch (e) {
-      setNotice({ tone: "err", text: e instanceof Error ? e.message : "Couldn't save that review." });
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -151,82 +112,8 @@ export default function ReviewsManager({ t }: { t: ThemeTokens }) {
           </div>
         </div>
         <p className="mt-2 text-xs" style={{ color: t.textFaint }}>
-          Students send reviews at the end of every MCQ session, past paper, test and mock test, and you can add your own. Pick up to {MAX_FEATURED} to show on the homepage.
+          Reviews are sent from the end of every MCQ session, past paper, test and mock test. Pick up to {MAX_FEATURED} to show on the homepage.
         </p>
-        <div className="mt-3">
-          <button
-            onClick={() => setShowForm((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold"
-            style={{ backgroundColor: t.purpleStrong, color: "#fff" }}
-          >
-            <Plus size={14} /> {showForm ? "Close form" : "Add a review"}
-          </button>
-        </div>
-        {showForm && (
-          <div className="mt-3 flex flex-col gap-3 rounded-2xl p-4" style={{ border: `1.5px solid ${t.border}` }}>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 text-xs font-bold" style={{ color: t.textMuted }}>
-                Reviewer name
-                <input
-                  value={fName}
-                  onChange={(e) => setFName(e.target.value)}
-                  maxLength={60}
-                  placeholder="e.g. Ayesha K."
-                  className="rounded-xl px-3 py-2 text-sm font-normal outline-none"
-                  style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}`, color: t.text }}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-bold" style={{ color: t.textMuted }}>
-                Detail (optional)
-                <input
-                  value={fContext}
-                  onChange={(e) => setFContext(e.target.value)}
-                  maxLength={160}
-                  placeholder="e.g. MBBS Year 2"
-                  className="rounded-xl px-3 py-2 text-sm font-normal outline-none"
-                  style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}`, color: t.text }}
-                />
-              </label>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold" style={{ color: t.textMuted }}>Rating</span>
-              <div className="flex items-center gap-1">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <button key={n} type="button" onClick={() => setFRating(n)} aria-label={`${n} star${n > 1 ? "s" : ""}`}>
-                    <Star size={22} color={t.gold} fill={n <= fRating ? t.gold : "transparent"} />
-                  </button>
-                ))}
-              </div>
-            </div>
-            <label className="flex flex-col gap-1 text-xs font-bold" style={{ color: t.textMuted }}>
-              Review
-              <textarea
-                value={fText}
-                onChange={(e) => setFText(e.target.value)}
-                maxLength={MAX_REVIEW_CHARS}
-                rows={4}
-                placeholder="What the student said about Modular Medico…"
-                className="rounded-xl px-3 py-2 text-sm font-normal outline-none"
-                style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}`, color: t.text, lineHeight: 1.6 }}
-              />
-              <span className="self-end font-normal" style={{ color: t.textFaint }}>{fText.length}/{MAX_REVIEW_CHARS}</span>
-            </label>
-            <label className="flex items-center gap-2 text-xs font-bold" style={{ color: t.textMuted }}>
-              <input type="checkbox" checked={fFeatured} onChange={(e) => setFFeatured(e.target.checked)} />
-              Show on homepage ({featuredCount}/{MAX_FEATURED} used)
-            </label>
-            <div>
-              <button
-                onClick={submitNew}
-                disabled={saving || !fName.trim() || !fText.trim()}
-                className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold disabled:opacity-50"
-                style={{ backgroundColor: t.teal, color: "#fff" }}
-              >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Save review
-              </button>
-            </div>
-          </div>
-        )}
         <div className="mt-3 flex gap-2">
           {(["all", "featured"] as const).map((k) => (
             <button

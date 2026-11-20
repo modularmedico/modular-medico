@@ -121,6 +121,7 @@ import {
 import { parseBracketFormat } from "../utils/parseBracketFormat";
 import FreeSubjectsManager from "../components/admin/FreeSubjectsManager";
 import FreeTestsManager from "../components/admin/FreeTestsManager";
+import FreeMockTestsManager from "../components/admin/FreeMockTestsManager";
 import FreePastPapersManager from "../components/admin/FreePastPapersManager";
 import TestSessionsManager from "../components/admin/TestSessionsManager";
 import MockTestsManager from "../components/admin/MockTestsManager";
@@ -4316,6 +4317,7 @@ export default function AdminPanel() {
           </Card>
 
           <FreeTestsManager />
+          <FreeMockTestsManager />
           <FreePastPapersManager />
 
           <Card t={t} style={{ backgroundColor: t.surface, border: `1.5px solid ${t.border}` }}>

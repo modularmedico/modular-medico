@@ -261,6 +261,33 @@ export async function saveFreeTests(ids: string[]): Promise<void> {
   await setDoc(doc(db, "settings", "freeTests"), { ids: cleaned });
 }
 
+/* ------------------------- Free individual mock tests ------------------------- */
+
+/**
+ * Mock Test ids that are FREE for everyone. Stored in `settings/freeMockTests` as
+ * `{ ids: string[] }`. Until an admin saves this doc the callback receives `null`,
+ * which means "legacy behaviour": a mock is open when its Block is open.
+ */
+export function subscribeFreeMockTests(cb: (ids: string[] | null) => void) {
+  return onSnapshot(
+    doc(db, "settings", "freeMockTests"),
+    (snap) => {
+      if (!snap.exists()) return cb(null);
+      const raw = (snap.data() as { ids?: unknown }).ids;
+      cb(Array.isArray(raw) ? Array.from(new Set(raw.map(String))) : []);
+    },
+    (err) => {
+      console.warn("Firestore freeMockTests fallback:", err.message);
+      cb(null);
+    }
+  );
+}
+
+/** Admin action: replace the list of free Mock Tests. */
+export async function saveFreeMockTests(ids: string[]): Promise<void> {
+  await setDoc(doc(db, "settings", "freeMockTests"), { ids: Array.from(new Set(ids)) });
+}
+
 /* ------------------- Free subjects inside paid blocks ------------------- */
 
 /**

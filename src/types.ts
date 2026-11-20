@@ -357,7 +357,7 @@ export interface TestLeaderboardEntry {
 /* -------------------------------------------------------------------------- */
 
 /** Where a student was when they left a review. */
-export type ReviewSource = "mcq" | "past_paper" | "test" | "mock" | "admin";
+export type ReviewSource = "mcq" | "past_paper" | "test" | "mock";
 
 /**
  * A student review, stored in the Firestore `reviews` collection. Students can only create

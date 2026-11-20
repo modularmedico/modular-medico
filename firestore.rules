@@ -136,8 +136,6 @@ service cloud.firestore {
         && request.resource.data.displayName is string && request.resource.data.displayName.size() <= 60
         && request.resource.data.source in ['mcq', 'past_paper', 'test', 'mock']
         && request.resource.data.keys().hasOnly(['uid', 'displayName', 'rating', 'text', 'source', 'context', 'featured', 'featuredAt', 'createdAt']);
-      // Admins can add reviews by hand (any source, may be featured straight away).
-      allow create: if isAdmin();
       allow update, delete: if isAdmin();
     }
 

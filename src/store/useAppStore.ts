@@ -69,6 +69,10 @@ interface AppState {
   // Blocks whose Past Papers are free for everyone. Defaults to ALL blocks (Past
   // Papers were previously open) until an admin saves settings/freePastPaperBlocks.
   freePaperBlocks: number[];
+  // Mock Tests that are free for everyone (settings/freeMockTests). null = admin hasn't saved
+  // the list yet, so mocks fall back to the old per-Block rule.
+  freeMockTestIds: string[] | null;
+  setFreeMockTestIds: (ids: string[] | null) => void;
   setFreePaperBlocks: (blocks: number[]) => void;
 
   // Whether Test Series are open to students at all — defaults to true (on)
@@ -134,6 +138,8 @@ export const useAppStore = create<AppState>()(
       setFreeSubjects: (map) => set({ freeSubjects: map }),
       freePaperBlocks: Array.from({ length: TOTAL_BLOCKS }, (_, i) => i + 1),
       setFreePaperBlocks: (blocks) => set({ freePaperBlocks: blocks }),
+      freeMockTestIds: null,
+      setFreeMockTestIds: (ids) => set({ freeMockTestIds: ids }),
 
       testSeriesEnabled: true,
       setTestSeriesEnabled: (enabled) => set({ testSeriesEnabled: enabled }),
@@ -176,6 +182,7 @@ export const useAppStore = create<AppState>()(
         freeBlocks: s.freeBlocks,
         freeSubjects: s.freeSubjects,
         freePaperBlocks: s.freePaperBlocks,
+        freeMockTestIds: s.freeMockTestIds,
         testSeriesEnabled: s.testSeriesEnabled,
         session: s.session,
         lastResult: s.lastResult,
@@ -260,3 +267,14 @@ export const useHasMockTestsUnlocked = () => useAppStore((s) => !!s.profile?.moc
 
 export const useCanAccessTestSeries = () =>
   useAppStore((s) => s.isAdmin || !!s.profile?.testSeriesUnlocked || s.testSeriesEnabled);
+
+/**
+ * Per-mock lock rule (mirrors Test Sessions). Once an admin has saved the free-mock list, a mock is
+ * FREE only if it's on that list; every other mock is PAID. Until then (list is null) the old
+ * rule applies: a mock is free when its Block is free.
+ */
+export const isMockPaid = (
+  mock: { id: string; block: number },
+  freeMockTestIds: string[] | null,
+  freeBlocks: number[]
+): boolean => (freeMockTestIds ? !freeMockTestIds.includes(mock.id) : !freeBlocks.includes(mock.block));
