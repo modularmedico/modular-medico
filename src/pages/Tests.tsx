@@ -381,14 +381,15 @@ export default function Tests() {
                       <ClipboardList size={12} /> Test session
                     </Pill>
                     {paid ? (
-                      <span
-                        className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold"
-                        style={{ backgroundColor: t.gold, color: "#241A08" }}
-                        title={locked ? "Paid test" : "Paid test (you have access)"}
-                      >
-                        {locked ? <Lock size={11} strokeWidth={2.75} /> : <Unlock size={11} strokeWidth={2.75} />}
-                        {locked ? "Paid" : "Paid \u00b7 Unlocked"}
-                      </span>
+                      locked ? (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold"
+                          style={{ backgroundColor: t.gold, color: "#241A08" }}
+                          title="Paid test"
+                        >
+                          <Lock size={11} strokeWidth={2.75} /> Paid
+                        </span>
+                      ) : null
                     ) : (
                       <span
                         className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold"
